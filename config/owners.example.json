@@ -1,0 +1,7 @@
+{
+  "host": "Macmini",
+  "home": "/Users/example/.codex",
+  "ssh": "Macmini",
+  "binary": "/path/to/codex",
+  "socket": "/Users/example/.codex/app-server-control/app-server-control.sock"
+}

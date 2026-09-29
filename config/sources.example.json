@@ -1,0 +1,21 @@
+{
+  "sources": [
+    {
+      "host": "local",
+      "home": "/home/example/.codex",
+      "sqlite_home": "/home/example/.codex"
+    },
+    {
+      "host": "Macmini",
+      "ssh": "Macmini",
+      "home": "/Users/example/.codex",
+      "sqlite_home": "/Users/example/.codex"
+    },
+    {
+      "host": "Thinkpad-ubuntu-server-2604",
+      "ssh": "Thinkpad-ubuntu-server-2604",
+      "home": "/home/example/.codex",
+      "sqlite_home": "/home/example/.codex"
+    }
+  ]
+}

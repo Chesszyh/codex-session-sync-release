@@ -1,0 +1,1 @@
+{"compilerOptions":{"target":"ES2022","lib":["ES2022","DOM","DOM.Iterable"],"module":"ESNext","moduleResolution":"bundler","jsx":"react-jsx","noEmit":true,"strict":true,"allowJs":true,"checkJs":false,"skipLibCheck":true,"allowImportingTsExtensions":true},"include":["src/app.tsx","src/archive.tsx","src/trace.js","src/vendor/codex-trace"]}

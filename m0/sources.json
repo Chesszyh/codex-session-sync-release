@@ -1,0 +1,11 @@
+{
+  "agentsview": {
+    "url": "https://github.com/kenn-io/agentsview.git",
+    "commit": "e5582c3bc5322ccc84200b358053fc997c7dd068"
+  },
+  "happier": {
+    "url": "https://github.com/happier-dev/happier.git",
+    "commit": "862e8dc90916957357203a123dc46ebfe49ed23a"
+  },
+  "esbuild": "0.25.12"
+}

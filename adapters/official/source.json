@@ -1,0 +1,10 @@
+{
+  "repository": "openai/codex",
+  "revision": "90f7b37d237de4a02d180a8d7f7d3470a4cdc356",
+  "rust_toolchain": "1.95.0",
+  "tested_runtime": "codex-cli 0.155.0-alpha.9.2",
+  "restore_tested_runtimes": [
+    "codex-cli 0.155.0-alpha.9.2",
+    "codex-cli 0.155.0-alpha.16.4"
+  ]
+}

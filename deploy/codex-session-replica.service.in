@@ -1,0 +1,16 @@
+[Unit]
+Description=Codex session replica collector
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@REPOSITORY@
+ExecStart=@PYTHON@ -m replica --store %h/.local/share/codex-session-sync/replica watch --config %h/.config/codex-session-sync/sources.json --interval 60
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=30
+UMask=0077
+Nice=5
+
+[Install]
+WantedBy=default.target

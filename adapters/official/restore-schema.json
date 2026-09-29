@@ -1,0 +1,70 @@
+{
+  "project_roots": [
+    "project_id",
+    "position",
+    "path"
+  ],
+  "projects": [
+    "id",
+    "name",
+    "metadata",
+    "position",
+    "created_at_ms",
+    "updated_at_ms"
+  ],
+  "thread_attachments": [
+    "id",
+    "thread_id",
+    "attachment_type",
+    "identity_key",
+    "payload",
+    "created_at"
+  ],
+  "thread_sections": [
+    "id",
+    "name",
+    "appearance"
+  ],
+  "threads": [
+    "id",
+    "rollout_path",
+    "created_at",
+    "updated_at",
+    "source",
+    "model_provider",
+    "cwd",
+    "title",
+    "sandbox_policy",
+    "approval_mode",
+    "tokens_used",
+    "has_user_event",
+    "archived",
+    "archived_at",
+    "git_sha",
+    "git_branch",
+    "git_origin_url",
+    "cli_version",
+    "first_user_message",
+    "agent_nickname",
+    "agent_role",
+    "memory_mode",
+    "model",
+    "reasoning_effort",
+    "agent_path",
+    "created_at_ms",
+    "updated_at_ms",
+    "thread_source",
+    "preview",
+    "recency_at",
+    "recency_at_ms",
+    "history_mode",
+    "name",
+    "is_pinned",
+    "thread_section_id",
+    "section_position",
+    "section_entered_at_ms",
+    "project_id",
+    "originator",
+    "daybreak_enabled"
+  ]
+}

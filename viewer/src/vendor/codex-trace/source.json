@@ -1,0 +1,33 @@
+{
+  "project": "codex-trace",
+  "repository": "https://github.com/PixelPaw-Labs/codex-trace.git",
+  "revision": "a9d9b6b0231930dff66eaab7a8756babd6dba946",
+  "version": "0.6.0",
+  "license": "MIT",
+  "files": [
+    "LICENSE",
+    "shared/types.ts",
+    "shared/format.ts",
+    "shared/diff.ts",
+    "shared/patch.ts",
+    "src/styles/global.css",
+    "src/components/SidebarTree.tsx",
+    "src/components/TurnList.tsx",
+    "src/components/TurnDetail.tsx",
+    "src/components/ToolCallItem.tsx",
+    "src/components/ComplementaryItem.tsx",
+    "src/components/MarkdownRenderer.tsx",
+    "src/components/OngoingDots.tsx",
+    "src/components/Icons.tsx",
+    "src/components/PopoutModal.tsx",
+    "src/lib/format.ts",
+    "src/lib/theme.ts",
+    "src/lib/sessionDisplay.ts"
+  ],
+  "adaptations": [
+    "Archive session identity and labels",
+    "Ordered complete record timeline and provenance slots",
+    "Archive-only inline media",
+    "Sidebar scroll helper inlined"
+  ]
+}

@@ -1,0 +1,15 @@
+[Unit]
+Description=Codex session readable history indexer
+After=codex-session-replica.service
+
+[Service]
+Type=simple
+WorkingDirectory=@REPOSITORY@
+ExecStart=@PYTHON@ -m replica --store %h/.local/share/codex-session-sync/replica normalize --interval 15
+Restart=on-failure
+RestartSec=15
+UMask=0077
+Nice=5
+
+[Install]
+WantedBy=default.target

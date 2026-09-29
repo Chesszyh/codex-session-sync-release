@@ -1,0 +1,67 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawn, execFileSync } from "node:child_process";
+import { mkdtemp, mkdir } from "node:fs/promises";
+import { resolve } from "node:path";
+import { chromium, expect } from "@playwright/test";
+
+test("browser persists history, searches offline and replaces updated items after reconnect", { timeout: 120000 }, async () => {
+  const repo = resolve("..");
+  await mkdir(resolve(repo, ".m2/browser-tests"), { recursive: true });
+  const root = await mkdtemp(resolve(repo, ".m2/browser-tests/run-"));
+  const archive = resolve(root, "archive");
+  const python = (args) => execFileSync("python3", args, { cwd: repo, env: { ...process.env, PYTHONPATH: repo } });
+  python(["tests/viewer_fixture.py", "--root", archive]);
+  const server = spawn("python3", ["-m", "replica", "--store", archive, "serve", "--port", "0"], { cwd: repo, stdio: ["ignore", "pipe", "pipe"] });
+  const url = await new Promise((resolve, reject) => { server.stdout.once("data", data => resolve(JSON.parse(data.toString()).url)); server.once("error", reject); });
+  let context;
+  try {
+    const profile = resolve(root, "browser-profile");
+    context = await chromium.launchPersistentContext(profile, { headless: true, viewport: { width: 1440, height: 1000 } });
+    const page = context.pages()[0];
+    const external = [];
+    page.on("request", request => { if (request.url().startsWith("https://invalid.example")) external.push(request.url()); });
+    await page.goto(url);
+    await expect(page.locator("#connection")).toHaveText("副本已同步");
+    await expect(page.locator(".sidebar-tree__session")).toHaveCount(3);
+    await page.getByRole("button", { name: /让每一次思考/ }).click();
+    await page.getByRole("button", { name: "Detail", exact: true }).click();
+    await expect(page.locator("#messages article")).toHaveCount(4);
+    await page.locator(".tool-call__header").click();
+    await expect(page.locator(".tool-call__output")).toContainText("Ran 15 tests");
+    assert.equal(await page.evaluate(() => window.__injected), undefined);
+    assert.deepEqual(external, []);
+    await page.screenshot({ path: resolve(repo, ".m2/viewer-desktop.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: resolve(repo, ".m2/viewer-mobile.png"), fullPage: true });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.locator("#search").fill("分段归档");
+    await expect(page.locator(".sidebar-tree__session")).toHaveCount(1);
+    await page.locator("#search").fill("");
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    await context.close();
+    context = await chromium.launchPersistentContext(profile, { headless: true, viewport: { width: 1440, height: 1000 } });
+    await context.setOffline(true);
+    const offline = context.pages()[0];
+    await offline.goto(url);
+    await expect(offline.locator("#connection")).toContainText("离线");
+    await expect(offline.locator(".sidebar-tree__session")).toHaveCount(3);
+    await offline.getByRole("button", { name: /让每一次思考/ }).click();
+    await offline.getByRole("button", { name: "Detail", exact: true }).click();
+    await expect(offline.locator("#messages")).toContainText("历史已经保存好了");
+    await offline.locator("#search").fill("分段归档");
+    await expect(offline.locator(".sidebar-tree__session")).toHaveCount(1);
+    await offline.locator("#search").fill("");
+    python(["tests/viewer_fixture.py", "--root", archive, "--update"]);
+    await context.setOffline(false);
+    await expect(offline.locator("#messages")).toContainText("已补齐最新记录", { timeout: 15000 });
+    await expect(offline.locator("#messages article")).toHaveCount(4);
+    await expect(offline.locator("#messages")).not.toContainText("历史已经保存好了");
+    const refused = await offline.request.post(url + "/api/turn/start", { data: {} });
+    assert.equal(refused.status(), 405);
+  } finally {
+    if (context) await context.close();
+    server.kill("SIGTERM");
+  }
+});

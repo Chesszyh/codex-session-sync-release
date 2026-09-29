@@ -1,0 +1,15 @@
+[Unit]
+Description=Codex owner notification observer
+After=network-online.target codex-session-replica.service
+
+[Service]
+Type=simple
+WorkingDirectory=@REPOSITORY@
+ExecStart=@PYTHON@ -m replica --store %h/.local/share/codex-session-sync/replica observe --config %h/.config/codex-session-sync/owner.json
+Restart=always
+RestartSec=10
+UMask=0077
+Nice=5
+
+[Install]
+WantedBy=default.target

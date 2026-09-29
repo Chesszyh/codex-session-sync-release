@@ -1,0 +1,14 @@
+[Unit]
+Description=Codex session read-only history viewer
+After=codex-session-indexer.service
+
+[Service]
+Type=simple
+WorkingDirectory=@REPOSITORY@
+ExecStart=@PYTHON@ -m replica --store %h/.local/share/codex-session-sync/replica serve --port 8765
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=default.target
