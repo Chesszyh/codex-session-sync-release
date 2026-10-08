@@ -2,17 +2,26 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { openCache, byKind, searchItems, synchronize } from "./cache.js";
 import { syncLive } from "./live.js";
+import { initialMode, searchReadPages } from "./reading.js";
 import { sessionInfo } from "./trace.js";
 import { SidebarTree } from "./vendor/codex-trace/src/components/SidebarTree";
 import type { CodexSessionInfo } from "./vendor/codex-trace/shared/types";
 import { Archive, type Thread } from "./archive";
 
-const db = await openCache();
+// The login URL bypasses the offline cache once; later reloads need the cached URL.
+if (new URLSearchParams(location.search).has("login"))
+  history.replaceState(null, "", location.pathname + location.hash);
+
+const db = await openCache(() => {
+  document.getElementById("root")!.textContent = "请关闭此网站的其他旧页面，缓存升级后会继续。";
+});
 function App() {
+  const [mode, setMode] = useState<"full" | "demand">(() => initialMode() as "full" | "demand");
   const [threads, setThreads] = useState<Thread[]>([]);
   const [revision, setRevision] = useState(0);
   const [selected, setSelected] = useState(() => decodeURIComponent(location.hash.slice(1)));
   const [connection, setConnection] = useState("正在打开本地副本");
+  const [needsLogin, setNeedsLogin] = useState(false);
   const [liveStatus, setLiveStatus] = useState("");
   const [archiveStatus, setArchiveStatus] = useState("");
   const [archiveDetails, setArchiveDetails] = useState("");
@@ -27,6 +36,20 @@ function App() {
   const search = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    localStorage.setItem("replica-sync-mode", mode);
+  }, [mode]);
+  useEffect(() => {
+    const changed = (event: StorageEvent) => {
+      if (event.key === "replica-sync-mode") setMode(initialMode() as "full" | "demand");
+    };
+    window.addEventListener("storage", changed);
+    return () => window.removeEventListener("storage", changed);
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setConnection(mode === "demand" ? "正在更新目录" : "正在打开本地副本");
+    setLiveStatus("");
     let stopped = false,
       refreshTimer: ReturnType<typeof setTimeout> | undefined;
     let historyTimer: ReturnType<typeof setTimeout>, liveTimer: ReturnType<typeof setTimeout>;
@@ -39,7 +62,9 @@ function App() {
       ]);
       if (stopped) return;
       const known = new Set(saved.map((t: Thread) => t.id));
-      setThreads([...saved, ...live.filter((t: Thread) => !known.has(t.id))]);
+      setThreads(
+        mode === "full" ? [...saved, ...live.filter((t: Thread) => !known.has(t.id))] : saved,
+      );
       setRevision((n) => n + 1);
       setArchiveStatus(
         hosts.length
@@ -54,11 +79,12 @@ function App() {
           )
           .join("\n"),
       );
-      setLiveStatus(
-        sources.length
-          ? `通知入口已连接 ${sources.filter((s: { status: string }) => s.status === "connected").length} 个${sources.some((s: { status: string }) => s.status === "disconnected") ? " · 通知存在缺口" : ""}`
-          : "",
-      );
+      if (mode === "full")
+        setLiveStatus(
+          sources.length
+            ? `通知入口已连接 ${sources.filter((s: { status: string }) => s.status === "connected").length} 个${sources.some((s: { status: string }) => s.status === "disconnected") ? " · 通知存在缺口" : ""}`
+            : "",
+        );
     }
     function schedule() {
       if (!refreshTimer)
@@ -73,31 +99,40 @@ function App() {
           db,
           (value: { state: string; phase: string; received: number; changed: number }) => {
             if (stopped) return;
+            setNeedsLogin(false);
             setConnection(
-              value.state === "syncing"
-                ? `${value.phase === "snapshot" ? "保存初始副本" : "正在补齐增量"} · 本次已保存 ${value.received} 条`
-                : "副本已同步",
+              mode === "demand"
+                ? value.state === "syncing"
+                  ? `正在更新目录 · ${value.received} 条`
+                  : "目录已更新"
+                : value.state === "syncing"
+                  ? `${value.phase === "snapshot" ? "保存初始副本" : "正在补齐增量"} · 本次已保存 ${value.received} 条`
+                  : "副本已同步",
             );
             if (value.changed) schedule();
           },
+          { scope: mode === "demand" ? "directory" : undefined, signal: controller.signal },
         );
       } catch (e) {
         const error = e as Error;
+        if (!stopped && error.message === "authentication_required") setNeedsLogin(true);
         if (!stopped)
           setConnection(
             error.name === "QuotaExceededError"
               ? "本地空间不足，同步已暂停"
-              : error.message === "reset_required"
-                ? "归档序号已变化，需要重新连接副本"
-                : "离线 · 阅读本地副本",
+              : error.message === "authentication_required"
+                ? "登录已过期 · 阅读本地副本"
+                : error.message === "reset_required"
+                  ? "归档序号已变化，需要重新连接副本"
+                  : "离线 · 阅读本地副本",
           );
       } finally {
-        if (!stopped) historyTimer = setTimeout(tick, 3000);
+        if (!stopped) historyTimer = setTimeout(tick, mode === "demand" ? 15000 : 3000);
       }
     }
     async function liveTick() {
       try {
-        await syncLive(db, schedule);
+        await syncLive(db, schedule, controller.signal);
       } catch {
         if (!stopped) setLiveStatus("状态连接中断 · 未捕获的通知可能缺失");
       } finally {
@@ -106,30 +141,35 @@ function App() {
     }
     void refresh().catch((e) => setConnection(`本地副本读取失败：${e.message}`));
     void tick();
-    void liveTick();
+    if (mode === "full") void liveTick();
     const onFocus = () => schedule();
     window.addEventListener("focus", onFocus);
     return () => {
       stopped = true;
+      controller.abort();
       clearTimeout(refreshTimer);
       clearTimeout(historyTimer);
       clearTimeout(liveTimer);
       window.removeEventListener("focus", onFocus);
     };
-  }, []);
+  }, [mode]);
 
   useEffect(() => {
     let current = true;
     setMatches(new Map());
     setVisibleCount(150);
     if (query.trim())
-      void searchItems(db, query.trim(), () => current).then((value) => {
-        if (current) setMatches(value as Map<string, { position: number; snippet: string }>);
-      });
+      void searchItems(db, query.trim(), () => current)
+        .then((value) =>
+          mode === "demand" ? searchReadPages(db, query.trim(), value, () => current) : value,
+        )
+        .then((value) => {
+          if (current) setMatches(value as Map<string, { position: number; snippet: string }>);
+        });
     return () => {
       current = false;
     };
-  }, [query, revision]);
+  }, [query, revision, mode]);
   useEffect(() => {
     function keyboard(e: KeyboardEvent) {
       if (e.key === "/" && !(e.target instanceof HTMLInputElement)) {
@@ -174,8 +214,8 @@ function App() {
           ref={search}
           id="search"
           type="search"
-          placeholder="搜索会话与内容"
-          aria-label="搜索会话与内容"
+          placeholder={mode === "demand" ? "搜索目录与已缓存内容" : "搜索会话与内容"}
+          aria-label={mode === "demand" ? "搜索目录与已缓存内容" : "搜索会话与内容"}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -224,10 +264,25 @@ function App() {
           onReachEnd={() => setVisibleCount((n) => n + 150)}
         />
         <footer>
+          <label className="sync-choice">
+            同步方式
+            <select
+              aria-label="同步方式"
+              value={mode}
+              onChange={(e) => setMode(e.target.value as "full" | "demand")}
+            >
+              <option value="demand">按需阅读</option>
+              <option value="full">完整离线副本</option>
+            </select>
+          </label>
+          <small>
+            {mode === "demand" ? "打开时加载，已读内容可离线" : "自动保存全部历史，离线可全文搜索"}
+          </small>
           <div id="connection" role="status">
             {connection}
           </div>
-          <small>本地已保存 {threads.length} 条会话</small>
+          {needsLogin && <a href="/?login=1">重新登录</a>}
+          <small>目录 {threads.length} 条会话</small>
           <small id="archive-status" title={archiveDetails}>
             {archiveStatus}
           </small>
@@ -242,13 +297,14 @@ function App() {
       <main>
         {thread ? (
           <Archive
-            key={thread.id}
+            key={`${thread.id}:${mode}`}
             db={db}
             thread={thread}
             revision={revision}
             hit={matches.get(thread.id)}
             threads={threads}
             onSelect={select}
+            mode={mode}
           />
         ) : (
           <div className="welcome">

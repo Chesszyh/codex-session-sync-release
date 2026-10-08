@@ -16,5 +16,5 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y zstd
       - run: python -m pip install -r requirements.txt
       - run: npm --prefix viewer ci
-      - run: npx --prefix viewer playwright install --with-deps chromium
+      - run: npx --prefix viewer playwright install --with-deps chromium webkit
       - run: python scripts/check.py

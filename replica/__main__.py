@@ -23,6 +23,9 @@ def main():
     normalize.add_argument("--interval", type=float, default=0, help="Repeat after this many seconds; zero runs once")
     serve = commands.add_parser("serve", help="Serve the read-only viewer on loopback")
     serve.add_argument("--port", type=int, default=8765)
+    serve.add_argument("--public-origin", help="HTTPS origin for a separate Access-authenticated loopback listener")
+    serve.add_argument("--access-team", help="Cloudflare Access team subdomain; required with --public-origin")
+    serve.add_argument("--access-audience", help="Cloudflare Access application AUD tag; required with --public-origin")
     live = commands.add_parser("observe", help="Capture events from an existing owner's supported socket")
     live.add_argument("--config", type=Path, required=True)
     live.add_argument("--seconds", type=float, help="End after a bounded observation; omit to stay connected")
@@ -83,7 +86,11 @@ def main():
             time.sleep(args.interval)
     if args.command == "serve":
         from .gateway import create_server
-        server = create_server(args.store, args.port)
+        try:
+            server = create_server(args.store, args.port, public_origin=args.public_origin,
+                                   access_team=args.access_team, access_audience=args.access_audience)
+        except ValueError as error:
+            parser.error(str(error))
         print(json.dumps({"url": f"http://127.0.0.1:{server.server_port}"}), flush=True)
         try:
             server.serve_forever()

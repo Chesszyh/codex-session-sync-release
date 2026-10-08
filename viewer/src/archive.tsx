@@ -3,8 +3,9 @@ import { TurnDetail } from "./vendor/codex-trace/src/components/TurnDetail";
 import { TurnList } from "./vendor/codex-trace/src/components/TurnList";
 import type { CodexTurn, TurnSummary } from "./vendor/codex-trace/shared/types";
 import { loadIndex, loadTurnPage, recordId } from "./trace.js";
+import { readIndex, readPage } from "./reading.js";
 
-type Index = Awaited<ReturnType<typeof loadIndex>>;
+type Index = Omit<Awaited<ReturnType<typeof loadIndex>>, "version"> & { version?: string };
 type Page = Awaited<ReturnType<typeof loadTurnPage>>;
 function SourceRecord({ row, origin }: { row: Page["rows"][number]; origin: string }) {
   const [open, setOpen] = useState(false);
@@ -53,6 +54,7 @@ export function Archive({
   hit,
   threads,
   onSelect,
+  mode,
 }: {
   db: IDBDatabase;
   thread: Thread;
@@ -60,6 +62,7 @@ export function Archive({
   hit?: { position: number };
   threads: Thread[];
   onSelect: (id: string) => void;
+  mode: "full" | "demand";
 }) {
   const [index, setIndex] = useState<Index | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -68,15 +71,33 @@ export function Archive({
   const [previous, setPrevious] = useState<number[]>([]);
   const [expanded, setExpanded] = useState(new Set<number>());
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [retry, setRetry] = useState(0);
+  const [check, setCheck] = useState(0);
   const lastHit = useRef<number | undefined>(undefined);
+  const indexVersion = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (mode !== "demand") return;
+    const timer = setInterval(() => setCheck((n) => n + 1), 15000);
+    return () => clearInterval(timer);
+  }, [mode]);
 
   useEffect(() => {
     let current = true;
-    loadIndex(db, thread.id)
-      .then((value) => {
+    const controller = new AbortController();
+    const load =
+      mode === "demand"
+        ? readIndex(db, thread.id, controller.signal)
+        : loadIndex(db, thread.id).then((value) => ({ value, notice: "" }));
+    load
+      .then(({ value, notice: message }) => {
         if (current) {
-          setIndex(value);
+          if (mode === "demand" && indexVersion.current !== value.version) setPage(null);
+          indexVersion.current = value.version;
+          setIndex((old) => (mode === "demand" && old?.version === value.version ? old : value));
           setError("");
+          setNotice(message);
         }
       })
       .catch((e) => {
@@ -84,8 +105,9 @@ export function Archive({
       });
     return () => {
       current = false;
+      controller.abort();
     };
-  }, [db, thread.id, revision]);
+  }, [db, thread.id, revision, retry, check, mode]);
 
   useEffect(() => {
     if (!index || hit?.position === lastHit.current) return;
@@ -115,8 +137,16 @@ export function Archive({
       return;
     }
     let current = true;
-    loadTurnPage(db, thread.id, selected, index, after)
-      .then((value) => {
+    const controller = new AbortController();
+    const load =
+      mode === "demand"
+        ? readPage(db, thread.id, selected, index, after, controller.signal)
+        : loadTurnPage(db, thread.id, selected, index, after).then((value) => ({
+            value,
+            notice: "",
+          }));
+    load
+      .then(({ value, notice: message }) => {
         if (!current) return;
         if (!value.rows.length && after !== -1) {
           setAfter(-1);
@@ -125,14 +155,20 @@ export function Archive({
         }
         setPage(value);
         setError("");
+        setNotice(message);
       })
       .catch((e) => {
-        if (current) setError(String(e));
+        if (!current) return;
+        if (e.message === "session_changed") {
+          setPage(null);
+          setCheck((n) => n + 1);
+        } else setError(String(e));
       });
     return () => {
       current = false;
+      controller.abort();
     };
-  }, [db, thread.id, selected, index, after]);
+  }, [db, thread.id, selected, index, after, mode, retry]);
 
   function selectTurn(i: number) {
     setSelected(index!.summaries[i].turn_id);
@@ -229,10 +265,29 @@ export function Archive({
             : "部分历史暂不可读，已保存的记录仍可查看。"}
         </div>
       )}
-      {error && <div role="alert">读取本地历史失败：{error}</div>}
-      {!index ? (
+      {notice && (
+        <div className="reading-notice" role="status">
+          {notice}
+          {notice.includes("登录") && <a href="/?login=1">重新登录</a>}
+        </div>
+      )}
+      {error && (
+        <div className="reading-notice" role="alert">
+          {error.replace(/^Error: /, "")}
+          <button
+            onClick={() => {
+              setError("");
+              setRetry((n) => n + 1);
+            }}
+          >
+            重试
+          </button>
+          {error.includes("登录") && <a href="/?login=1">重新登录</a>}
+        </div>
+      )}
+      {!index && !error ? (
         <div className="app__loading">正在读取轮次…</div>
-      ) : (
+      ) : index ? (
         <div className={`archive-panels ${selected ? "has-detail" : ""}`}>
           <div className="archive-turns">
             <TurnList
@@ -292,7 +347,7 @@ export function Archive({
             </div>
           )}
         </div>
-      )}
+      ) : null}
     </section>
   );
 }

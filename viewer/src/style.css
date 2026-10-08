@@ -15,6 +15,11 @@ button:disabled { cursor: default; opacity: .4; }
 .replica-sidebar .sidebar-tree { flex: 1; min-height: 0; }
 .replica-sidebar footer { padding: 14px; border-top: 1px solid var(--border); font-size: 12px; }
 .replica-sidebar small { display: block; margin-top: 7px; color: var(--text-secondary); }
+.sync-choice { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sync-choice select { min-width: 0; background: var(--bg); color: var(--text-primary); border: 1px solid var(--border); padding: 5px; }
+#connection { margin-top: 10px; }
+.reading-notice { padding: 8px 12px; font-size: 12px; overflow-wrap: anywhere; }
+.reading-notice button, .reading-notice a { margin-left: 10px; }
 .replica-app > main { flex: 1; min-width: 0; }
 .welcome { height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; color: var(--text-secondary); }
 .welcome h2 { font-size: 20px; }

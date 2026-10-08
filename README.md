@@ -46,7 +46,7 @@ python scripts/demo.py --root /tmp/codex-replica-demo --port 8766
 
 `--root` 必须是尚不存在的目录。打开 `http://127.0.0.1:8766`，选择“生成样本：跨设备会话归档”，点击 **Detail**，展开工具记录和“来源与原始条目”。演示会真正执行生成源数据→采集→原始字节导出核对→官方投影→浏览器阅读；只使用生成数据。终端 Ctrl+C 停止服务，演示目录保留。
 
-先等待“副本已同步”，保持同一地址和浏览器，断网后重新加载即可检查离线阅读。自动验证包括浏览器重开与重连补齐，见[验证入口](#验证)。
+完整模式先等待“副本已同步”；按需模式先打开需要离线阅读的页面。保持同一地址和浏览器，断网后重新加载即可检查离线阅读。两种模式的缓存与切换规则见[同步方式](docs/Viewer-Usage.md#同步方式)。
 
 ## 使用自己的历史
 
@@ -66,11 +66,11 @@ python3 scripts/add_source.py --server Macmini --ssh NewMachine --host NewMachin
 
 ```sh
 . .venv/bin/activate
-(cd viewer && npx playwright install chromium)
+(cd viewer && npx playwright install chromium webkit)
 python scripts/check.py
 ```
 
-Linux 的精简系统可使用 `npx playwright install --with-deps chromium` 安装浏览器系统依赖。普通检查明确输出依赖缺失导致的跳过；仓库 CI（持续集成）运行核心归档、通知与浏览器检查，不构建 Rust 适配器，也不验证原生恢复。
+Linux 的精简系统可使用 `npx playwright install --with-deps chromium webkit` 安装浏览器系统依赖。普通检查明确输出依赖缺失导致的跳过；仓库 CI（持续集成）运行核心归档、通知与浏览器检查，不构建 Rust 适配器，也不验证原生恢复。
 
 完整检查要求已构建官方适配器，以及 `source.json` 允许的固定原生运行时：
 

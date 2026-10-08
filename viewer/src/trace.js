@@ -20,13 +20,16 @@ export function sessionInfo(thread) {
     thread.updated_at == null
       ? ""
       : iso(typeof thread.updated_at === "number" ? thread.updated_at * 1000 : thread.updated_at);
+  const localDate = date ? new Date(date) : null;
   return {
     id: thread.id,
     path: thread.id,
     cwd: thread.cwd ?? null,
     thread_name: thread.title,
     start_time: date,
-    date_group: date.slice(0, 10) || "日期未知",
+    date_group: localDate
+      ? `${localDate.getFullYear()}-${String(localDate.getMonth() + 1).padStart(2, "0")}-${String(localDate.getDate()).padStart(2, "0")}`
+      : "日期未知",
     is_ongoing: thread.coverage.status === "live",
     parent_session_id: parent ? JSON.stringify([thread.origin, parent]) : null,
     is_external_worker: !!parent,
@@ -213,6 +216,39 @@ function summarize(summaries, row) {
   if (!messageTypes.has(i.type)) summary.tool_call_count++;
 }
 
+export function indexFromPreviews(data) {
+  const summaries = new Map(),
+    metadata = new Map(data.turns.map((row) => [row.id, row]));
+  for (const row of data.previews) summarize(summaries, row);
+  finishSummaries(summaries, metadata);
+  return {
+    summaries: [...summaries.values()].sort((a, b) => a.position - b.position),
+    metadata,
+    live: [],
+    version: data.version,
+  };
+}
+
+function finishSummaries(summaries, metadata) {
+  for (const [id, meta] of metadata) {
+    if (!summaries.has(id))
+      summaries.set(id, {
+        ...blankTurn(id),
+        position: Number.MAX_SAFE_INTEGER,
+        items: 0,
+        has_detail: true,
+        tool_call_count: 0,
+        reasoning_count: 0,
+      });
+    Object.assign(summaries.get(id), {
+      status: status(meta.status),
+      started_at: meta.startedAt ?? null,
+      completed_at: meta.completedAt ?? null,
+      duration_ms: meta.durationMs ?? null,
+    });
+  }
+}
+
 export async function loadIndex(db, session) {
   const summaries = new Map(),
     metadata = new Map(),
@@ -255,28 +291,12 @@ export async function loadIndex(db, session) {
       source: { generation: "通知 " + row.epoch, start: row.first_seq, end: row.first_seq },
     }));
   live.forEach((row) => summarize(summaries, row));
-  for (const [id, meta] of metadata) {
-    if (!summaries.has(id))
-      summaries.set(id, {
-        ...blankTurn(id),
-        position: Number.MAX_SAFE_INTEGER,
-        items: 0,
-        has_detail: true,
-        tool_call_count: 0,
-        reasoning_count: 0,
-      });
-    const summary = summaries.get(id);
-    Object.assign(summary, {
-      status: status(meta.status),
-      started_at: meta.startedAt ?? null,
-      completed_at: meta.completedAt ?? null,
-      duration_ms: meta.durationMs ?? null,
-    });
-  }
+  finishSummaries(summaries, metadata);
   return {
     summaries: [...summaries.values()].sort((a, b) => a.position - b.position),
     metadata,
     live,
+    version: undefined,
   };
 }
 

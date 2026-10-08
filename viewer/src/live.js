@@ -1,3 +1,5 @@
+import { fetchReplica } from "./api.js";
+
 const req = request => new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
 const done = tx => new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error); });
 const sessionKey = (origin, thread) => JSON.stringify([origin, thread]);
@@ -51,14 +53,16 @@ export async function applyLive(db, page, snapshot = false) {
   return cursor;
 }
 
-export async function syncLive(db, notify) {
+export async function syncLive(db, notify, signal) {
   return navigator.locks.request("replica-live-sync", { ifAvailable: true }, async lock => {
-    if (!lock) return;
+    if (!lock || signal?.aborted) return;
     let cursor = await req(db.transaction("meta").objectStore("meta").get("live_cursor"));
     while (true) {
-      const response = await fetch(cursor === undefined ? "/api/live/snapshot" : `/api/live/changes?after=${cursor}`);
+      signal?.throwIfAborted();
+      const response = await fetchReplica(cursor === undefined ? "/api/live/snapshot" : `/api/live/changes?after=${cursor}`, { signal });
       if (!response.ok) return;
       const page = await response.json();
+      signal?.throwIfAborted();
       if (!page.available) return;
       if (page.reset_required) { cursor = undefined; continue; }
       const changed = cursor === undefined || page.events.length > 0;
@@ -66,7 +70,7 @@ export async function syncLive(db, notify) {
       if (changed) notify();
       let consumer = await req(db.transaction("meta").objectStore("meta").get("live_consumer"));
       if (!consumer) { consumer = crypto.randomUUID(); const tx = db.transaction("meta", "readwrite"); const saved = done(tx); tx.objectStore("meta").put(consumer, "live_consumer"); await saved; }
-      await fetch("/api/live/ack", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ consumer, seq: cursor }) });
+      await fetchReplica("/api/live/ack", { method: "POST", signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ consumer, seq: cursor }) });
       if (!page.events || page.done) return;
     }
   });

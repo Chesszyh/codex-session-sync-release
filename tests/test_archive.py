@@ -1,4 +1,5 @@
 import json
+import base64
 import os
 from pathlib import Path
 import shutil
@@ -81,6 +82,57 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(identity, self.generation())
         self.assertEqual(self.exported(identity), self.path.read_bytes())
         self.assertEqual(self.run_scan()["read_bytes"], 0)
+
+    def test_source_rejects_traversal_symlinks_and_special_files(self):
+        secret = self.home / "auth.json"
+        secret.write_text('{"credential":"FAKE_CREDENTIAL_ONLY"}\n')
+        (self.home / "sessions/leak.jsonl").symlink_to(secret)
+        outside = self.root / "outside.jsonl"
+        outside.write_text('{"credential":"FAKE_CREDENTIAL_ONLY"}\n')
+        (self.home / "sessions/outside.jsonl").symlink_to(outside)
+        (self.home / "archived_sessions").symlink_to(self.root, target_is_directory=True)
+        (self.home / "sessions/directory").symlink_to(self.home, target_is_directory=True)
+        (self.home / "session_index.jsonl").symlink_to(secret)
+        os.mkfifo(self.home / "sessions/pipe.jsonl")
+        for relative in ("sessions/../auth.json", "sessions/leak.jsonl",
+                         "sessions/directory/auth.json", "sessions/outside.jsonl",
+                         "archived_sessions/outside.jsonl", "session_index.jsonl",
+                         "sessions/pipe.jsonl", str(secret)):
+            with self.subTest(relative=relative), self.assertRaises((OSError, ValueError)):
+                list(self.client.local.chunks(relative, 0))
+        report = self.run_scan()
+        self.assertFalse(report["complete"])
+        self.assertEqual([r[0] for r in self.store.db.execute("SELECT path FROM files")],
+                         [str(self.path.relative_to(self.home))])
+        self.assertNotIn(b"FAKE_CREDENTIAL_ONLY", self.exported(self.generation()))
+
+    def test_open_source_cannot_be_redirected_by_path_replacement(self):
+        before = self.path.read_bytes()
+        reader = self.client.local.chunks(str(self.path.relative_to(self.home)), 0)
+        self.assertEqual(next(reader)["kind"], "begin")
+        self.path.rename(self.path.with_suffix(".old"))
+        secret = self.home / "auth.json"
+        secret.write_bytes(b"FAKE_CREDENTIAL_ONLY")
+        self.path.symlink_to(secret)
+        rows = list(reader)
+        self.assertEqual(b"".join(base64.b64decode(r["bytes"]) for r in rows if r["kind"] == "chunk"), before)
+        with self.assertRaises(OSError):
+            list(self.client.local.chunks(str(self.path.relative_to(self.home)), 0))
+
+    def test_directory_replacement_cannot_redirect_an_open_source(self):
+        source = self.client.local
+        opened = os.open
+        def replace_directory(path, flags, **kwargs):
+            fd = opened(path, flags, **kwargs)
+            if path == "sessions":
+                (self.home / "sessions").rename(self.home / "previous-sessions")
+                (self.home / "sessions").symlink_to(self.root, target_is_directory=True)
+            return fd
+        before = self.path.read_bytes()
+        (self.root / self.path.name).write_bytes(b"FAKE_CREDENTIAL_ONLY")
+        with patch("replica.source.os.open", side_effect=replace_directory):
+            rows = list(source.chunks(str(self.path.relative_to(self.home)), 0))
+        self.assertEqual(b"".join(base64.b64decode(r["bytes"]) for r in rows if r["kind"] == "chunk"), before)
 
     def test_atomic_replacement_and_same_size_rewrite_keep_old_generation(self):
         self.run_scan()

@@ -54,3 +54,15 @@ test('native subagent source metadata connects children within the same home', (
   const info=sessionInfo({id:'child',origin:'host:/home',coverage:{},metadata:{source:JSON.stringify({subagent:{thread_spawn:{parent_thread_id:'parent'}}})}});
   assert.equal(info.parent_session_id, '["host:/home","parent"]');
 });
+
+test('session date groups use the reader timezone across UTC midnight', () => {
+  const oldTZ = process.env.TZ;
+  process.env.TZ = 'Asia/Shanghai';
+  try {
+    const info = sessionInfo({id:'today',origin:'host:/home',title:'Today',coverage:{},updated_at:Date.parse('2026-10-07T19:42:00Z') / 1000});
+    assert.equal(info.date_group, '2026-10-08');
+    assert.equal(info.start_time, '2026-10-07T19:42:00.000Z');
+  } finally {
+    if (oldTZ === undefined) delete process.env.TZ; else process.env.TZ = oldTZ;
+  }
+});

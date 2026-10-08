@@ -78,7 +78,7 @@ test('trace keeps old caches, virtualizes long histories, pages ordered records 
       const value=await new Promise(resolve=>{const r=db.transaction('meta').objectStore('meta').get('upgrade-test');r.onsuccess=()=>resolve(r.result);});
       const version=db.version;db.close();return {value,version};
     });
-    assert.deepEqual(cache,{value:'retained',version:2});
+    assert.deepEqual(cache,{value:'retained',version:3});
     fixture(true);
     await expect(page.locator('#messages')).toHaveCount(0,{timeout:15000});
     await page.getByRole('button',{name:'Detail',exact:true}).click();
