@@ -6,6 +6,8 @@
 
 采集机需要 Python 3、[Python 依赖](../requirements.txt) 和 SSH 客户端。源主机需要 Python 3；读取 `.jsonl.zst` 还需要源主机上的 `zstd`。远程读取复用已有 SSH 配置，不在远程安装后台进程。
 
+原始文件读取仅允许 `sessions/`、`archived_sessions/` 内的普通文件及 `session_index.jsonl`。这些路径中的符号链接、父目录跳转和特殊文件会被拒绝，并使本轮扫描标记为不完整；已有归档继续保留。
+
 ## 一条命令接入新机器
 
 在本仓库运行，将 `NewMachine` 换成**采集机能够连接的** SSH 别名或 `user@address`：

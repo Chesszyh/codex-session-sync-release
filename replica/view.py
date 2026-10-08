@@ -39,6 +39,8 @@ class View:
           seq INTEGER PRIMARY KEY AUTOINCREMENT,key TEXT NOT NULL,kind TEXT NOT NULL,
           session TEXT NOT NULL,data TEXT);
         CREATE INDEX IF NOT EXISTS journal_key ON journal(key,seq);
+        CREATE INDEX IF NOT EXISTS journal_session ON journal(session,seq);
+        CREATE INDEX IF NOT EXISTS journal_kind ON journal(kind,seq);
         """)
 
     def close(self):
@@ -61,11 +63,13 @@ class View:
     def seq(self):
         return self.db.execute("SELECT coalesce(max(seq),0) FROM journal").fetchone()[0]
 
-    def feed(self, after=0, limit=100, snapshot=None):
+    def feed(self, after=0, limit=100, snapshot=None, scope=None):
         self.db.execute("BEGIN")
         try:
             maximum = self.seq() if snapshot is None else min(snapshot, self.seq())
             query = "SELECT j.* FROM journal j WHERE j.seq>? AND j.seq<=?"
+            if scope == "directory":
+                query += " AND j.kind IN ('thread','host')"
             if snapshot is not None:
                 query += " AND j.seq=(SELECT max(p.seq) FROM journal p WHERE p.key=j.key AND p.seq<=?)"
             args = (after, maximum, maximum, limit) if snapshot is not None else (after, maximum, limit)
@@ -84,6 +88,52 @@ class View:
 
     def threads(self):
         return [json.loads(row[0]) for row in self.db.execute("SELECT data FROM entities WHERE kind='thread'")]
+
+    def read_version(self, session):
+        return str(self.db.execute("SELECT coalesce(max(seq),0) FROM journal WHERE session=?", (session,)).fetchone()[0])
+
+    def read_index(self, session, version=None):
+        self.db.execute("BEGIN")
+        try:
+            current = self.read_version(session)
+            if not self.db.execute("SELECT 1 FROM entities WHERE session=? AND kind='thread'", (session,)).fetchone():
+                raise KeyError("session_not_found")
+            if version == current:
+                return {"version": current, "unchanged": True}
+            # Previews exclude tool payloads and attachments; the body travels only on page requests.
+            rows = self.db.execute("""SELECT json_extract(data,'$.turn') AS turn,
+                json_extract(data,'$.position') AS position,
+                json_extract(data,'$.item.type') AS type,
+                CASE WHEN json_extract(data,'$.item.type') IN ('userMessage','agentMessage')
+                  THEN substr(json_extract(data,'$.text'),1,600) ELSE '' END AS text,
+                json_extract(data,'$.startedAtMs') AS startedAtMs
+                FROM entities WHERE session=? AND kind='item'""", (session,))
+            previews = [{"turn": r["turn"], "position": r["position"], "item": {"type": r["type"]},
+                         "text": r["text"], "startedAtMs": r["startedAtMs"]} for r in rows]
+            turns = [json.loads(r[0]) for r in self.db.execute("SELECT data FROM entities WHERE session=? AND kind='turn'", (session,))]
+            return {"version": current, "previews": previews, "turns": turns}
+        finally:
+            self.db.rollback()
+
+    def read_page(self, session, turn, after=-1, limit=60, version=None):
+        self.db.execute("BEGIN")
+        try:
+            current = self.read_version(session)
+            if version != current:
+                return {"error": "session_changed", "version": current}
+            rows = self.db.execute("""SELECT data FROM entities WHERE session=? AND kind='item'
+                AND json_extract(data,'$.turn')=? AND json_extract(data,'$.position')>?
+                ORDER BY json_extract(data,'$.position') LIMIT ?""", (session, turn, after, limit + 1))
+            items, size, more = [], 0, False
+            for row in rows:
+                if len(items) >= limit or size >= 2 * 1024 * 1024:
+                    more = True
+                    break
+                items.append(json.loads(row[0]))
+                size += len(row[0])
+            return {"version": current, "rows": items, "more": more}
+        finally:
+            self.db.rollback()
 
     def items(self, session, after=-1, limit=100):
         rows = self.db.execute("SELECT data FROM entities WHERE session=? AND kind='item' AND json_extract(data,'$.position')>? ORDER BY json_extract(data,'$.position') LIMIT ?", (session, after, limit))

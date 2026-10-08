@@ -1,6 +1,15 @@
 # 阅读与离线同步
 
-查看器从归档读取历史，浏览器保存独立副本。首次同步完成后，即使来源主机或归档服务不在线，使用同一浏览器、同一地址仍可阅读和搜索已经保存的内容。
+查看器从归档读取历史，浏览器保存独立缓存。使用同一浏览器、同一地址，断网后仍可阅读已经缓存的内容。
+
+## 同步方式
+
+在会话列表底部选择“同步方式”，选择会保存在当前浏览器、当前网站中，并同步到同站点的其他标签页。首次使用时，触控设备默认“按需阅读”，电脑默认“完整离线副本”；改变窗口大小不会改变已选模式。
+
+- **按需阅读**：先更新会话目录，打开会话后加载轮次摘要，打开轮次或翻页时才下载对应正文。已打开的页面保留离线缓存；未缓存内容需要联网。搜索覆盖目录标题和本地已有正文，不会为搜索下载全部历史。当前会话更新后会重新校验缓存版本，避免混用不同历史头。
+- **完整离线副本**：持续同步全部会话与正文，首次完成后可离线全文搜索；后续按保存的游标补齐增量。
+
+切换到按需阅读会停止全量同步，保留已有缓存与全量游标；切回完整离线副本会从原位置继续。切换模式本身不会释放已占用的存储空间。按需阅读跟随归档更新，完整模式还会接收原生实时通知。
 
 已部署的电脑可使用[一键启动入口](Launcher-Usage.md)。
 
@@ -26,6 +35,45 @@ systemctl --user enable --now codex-session-indexer.service codex-session-viewer
 
 服务状态以 `systemctl --user status` 为准。查看器只监听本机回环地址，远程访问可使用已有 SSH 连接将远程本地端口转发到归档机。
 
+HTTP 连接设有读写空闲超时和并发上限，超限连接会关闭；默认值见 `replica/gateway.py` 的 `GatewayServer`。反向代理仍应限制客户端慢请求及请求速率。
+
+## 通过域名访问
+
+手机或没有 SSH 的设备可以通过 Cloudflare Tunnel 访问查看器，并由 Cloudflare Access 验证登录身份。公网查看器使用独立的回环端口，强制校验每个请求的 Access 令牌签名、签发者、应用 Audience 和有效期；缺少配置、令牌或无法验证时拒绝访问。本机及 SSH 查看器继续使用原来的端口。
+
+```sh
+.venv/bin/python -m replica --store ~/.local/share/codex-session-sync/replica \
+  serve --port 8767 --public-origin https://archive.example.com \
+  --access-team YOUR_TEAM --access-audience YOUR_ACCESS_APPLICATION_AUD
+```
+
+macOS 安装后台服务时，将 `--public-origin`、`--access-team`、`--access-audience` 同时传给 `scripts/install_macos_services.py`；它会另建 `public-viewer` 服务，默认使用端口 8767，可通过 `--public-port` 修改。本机 `viewer` 服务保持端口 8765。升级旧的单入口部署时，将隧道改指向新的公网端口，并从本机服务移除 `--public-origin`。
+
+先为域名创建 Access 自托管应用，将允许策略限定到自己的邮箱。再配置隧道的入口：
+
+```yaml
+ingress:
+  - hostname: archive.example.com
+    path: '^(/|/app[.]js|/style[.]css|/sw[.]js|/api/(status|snapshot|changes|read/(index|page)|live/(snapshot|changes|ack)))$'
+    service: http://127.0.0.1:8767
+    originRequest:
+      httpHostHeader: archive.example.com
+      connectTimeout: 5s
+      disableChunkedEncoding: true
+      access:
+        required: true
+        teamName: YOUR_TEAM
+        audTag:
+          - YOUR_ACCESS_APPLICATION_AUD
+  - service: http_status:404
+```
+
+此入口只转发浏览器查看器使用的页面、资源和接口，其余路径返回 404。`/api/threads`、`/api/items` 仍可通过本机或 SSH 入口使用。
+
+`teamName` 和 `audTag` 分别取自 Access 团队域名前缀和应用的 Audience 标识。隧道连接器和公网查看器分别验证 Access 签发的令牌，三个启动参数必须同时配置。后端只接受配置域名作为 Host，不能通过改用本机 Host 绕过校验。本机查看器拒绝带代理转发标记的请求，隧道只能指向公网端口。确认入口校验已配置后，将域名路由到此隧道。未登录时，首页、页面资源和 `/api/status` 都应跳转登录或拒绝访问；登录后再核对会话读取和 `/api/live/ack` 确认请求。官方配置说明见 [Access 与 Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/origin-parameters/#access)。
+
+登录过期时，已缓存页面显示“登录已过期 · 阅读本地副本”，点击“重新登录”恢复在线同步。Access 控制网络访问，不清除浏览器已有副本；共享设备使用完毕后应清除此站点数据。域名与原来的本机地址各有独立副本，首次通过域名登录需要重新同步。Mac mini 离线时，隧道不能提供新数据。
+
 ## 阅读
 
 会话标题优先使用原生 `session_index.jsonl` 中最新的非空名称，没有名称时回退到数据库标题。改名会随下一轮采集同步。
@@ -40,7 +88,7 @@ systemctl --user enable --now codex-session-indexer.service codex-session-viewer
 
 ## 离线与重新连接
 
-左下角区分“保存初始副本”和“正在补齐增量”，数字是本次保存的条目数量，不是会话总数。“副本已同步”表示已保存到本轮服务端序号。同步期间可以继续阅读已缓存内容。断开网络或关闭服务后，界面显示“离线 · 阅读本地副本”，原来的内容仍保留。重新连接会补齐变化，相同条目的新快照替换旧值。首次同步大归档时，目录可能晚于正文到达，此时同步进度仍会持续更新。
+完整模式的左下角区分“保存初始副本”和“正在补齐增量”，数字是本次保存的条目数量，不是会话总数。“副本已同步”表示已保存到本轮服务端序号。按需模式的“目录已更新”仅指目录，不表示正文已完整缓存。断开网络或关闭服务后仍可读取缓存；未缓存的正文会提示联网。完整模式首次同步大归档时，目录可能晚于正文到达，此时同步进度仍会持续更新。
 
 浏览器通过 IndexedDB 保存记录与同步进度，并使用 Service Worker 保存页面资源。同一浏览器配置和地址重开会从已保存的游标补增量；`localhost:8765` 与 `127.0.0.1:8765` 属于不同站点，各有独立副本，日常固定使用其中一个。首次启动会申请持久存储；能否获得由浏览器决定。不要在清理网站数据后期待仍有离线副本。浏览器空间不足时同步进度不会前进，界面会显示同步暂停。
 
@@ -62,4 +110,4 @@ npm --prefix viewer test
 npm --prefix viewer run check
 ```
 
-浏览器测试启动自己的生成数据服务，验证搜索、工具展开、浏览器重开后的离线读取、重连替换及 HTML 内容隔离。codex-trace 接入测试还覆盖旧缓存升级、长历史分页、虚拟列表和历史头替换。生成样本截图保存在 `.m2/`。
+浏览器测试启动自己的生成数据服务，验证搜索、工具展开、浏览器重开后的离线读取、重连替换及 HTML 内容隔离。codex-trace 接入测试还覆盖旧缓存升级、长历史分页、虚拟列表和历史头替换。手机测试使用 Chromium 与 WebKit，覆盖触摸导航、工具弹窗、登录过期后重新连接及服务离线后的阅读；它不替代真机验证。生成样本截图保存在 `.m2/`，手机测试截图保存在 `.m6/mobile-access/`。

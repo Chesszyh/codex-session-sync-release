@@ -5,7 +5,7 @@
   "scripts": {
     "build": "node build.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "tsc --noEmit && oxlint src/app.tsx src/trace.js src/archive.tsx src/vendor/codex-trace && oxfmt --check src/app.tsx src/trace.js src/archive.tsx"
+    "check": "tsc --noEmit && oxlint src/app.tsx src/trace.js src/archive.tsx src/reading.js src/vendor/codex-trace && oxfmt --check src/app.tsx src/trace.js src/archive.tsx src/reading.js"
   },
   "dependencies": {
     "@thesvg/react": "^3.3.7",

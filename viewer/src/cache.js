@@ -1,13 +1,21 @@
+import { fetchReplica } from "./api.js";
+
 const request = req => new Promise((resolve, reject) => { req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); });
 const complete = tx => new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error); });
 
-export async function openCache() {
-  const opening = indexedDB.open("codex-session-replica", 2);
-  opening.onupgradeneeded = () => {
+export async function openCache(onBlocked = () => {}) {
+  const opening = indexedDB.open("codex-session-replica", 3);
+  opening.onblocked = onBlocked;
+  opening.onupgradeneeded = event => {
     const db = opening.result;
+    const reads = db.createObjectStore("reads", { keyPath: "key" });
+    reads.createIndex("session", "session");
+    reads.createIndex("kind", "kind");
     if (db.objectStoreNames.contains("entities")) {
-      opening.transaction.objectStore("entities").createIndex("turnPosition", ["session", "data.turn", "data.position"]);
-      opening.transaction.objectStore("entities").createIndex("sessionKind", ["session", "kind"]);
+      if (event.oldVersion < 2) {
+        opening.transaction.objectStore("entities").createIndex("turnPosition", ["session", "data.turn", "data.position"]);
+        opening.transaction.objectStore("entities").createIndex("sessionKind", ["session", "kind"]);
+      }
       return;
     }
     const entities = db.createObjectStore("entities", { keyPath: "key" });
@@ -18,7 +26,9 @@ export async function openCache() {
     entities.createIndex("sessionKind", ["session", "kind"]);
     db.createObjectStore("meta");
   };
-  return request(opening);
+  const db = await request(opening);
+  db.onversionchange = () => db.close();
+  return db;
 }
 
 export async function scanSession(db, session, visit, kind, includeDeleted = false) {
@@ -49,11 +59,11 @@ export async function turnItems(db, session, turn, after = -1, limit = 60) {
   });
 }
 
-export async function progress(db) {
-  return (await request(db.transaction("meta").objectStore("meta").get("progress"))) || { phase: "snapshot", cursor: "0" };
+export async function progress(db, key = "progress") {
+  return (await request(db.transaction("meta").objectStore("meta").get(key))) || { phase: "snapshot", cursor: "0" };
 }
 
-export async function applyPage(db, page, next) {
+export async function applyPage(db, page, next, key = "progress") {
   const tx = db.transaction(["entities", "meta"], "readwrite");
   const done = complete(tx);
   const entities = tx.objectStore("entities");
@@ -63,7 +73,7 @@ export async function applyPage(db, page, next) {
       if (!previous.result || BigInt(change.seq) >= BigInt(previous.result.seq)) entities.put(change);
     };
   }
-  tx.objectStore("meta").put(next, "progress");
+  tx.objectStore("meta").put(next, key);
   await done;
 }
 
@@ -105,19 +115,24 @@ export async function searchItems(db, query, current = () => true) {
   });
 }
 
-export async function synchronize(db, notify) {
-  return navigator.locks.request("replica-history-sync", { ifAvailable: true }, async lock => {
-    if (!lock) return;
-    let p = await progress(db);
+export async function synchronize(db, notify, { scope, signal } = {}) {
+  // A mode switch waits for the cancelled writer to release its transaction.
+  return navigator.locks.request("replica-history-sync", signal ? { signal } : { ifAvailable: true }, async lock => {
+    if (!lock || signal?.aborted) return;
+    const key = scope === "directory" ? "directory-progress" : "progress";
+    let p = await progress(db, key);
     let received = 0;
     while (true) {
+      signal?.throwIfAborted();
       const params = new URLSearchParams({ after: p.cursor, limit: "100" });
+      if (scope) params.set("scope", scope);
       if (p.at) params.set("at", p.at);
-      const response = await fetch(`/api/${p.phase === "snapshot" ? "snapshot" : "changes"}?${params}`);
+      const response = await fetchReplica(`/api/${p.phase === "snapshot" ? "snapshot" : "changes"}?${params}`, { signal });
       if (!response.ok) throw new Error(response.status === 409 ? "reset_required" : "connection_failed");
       const page = await response.json();
+      signal?.throwIfAborted();
       const next = p.phase === "snapshot" && !page.done ? { phase: "snapshot", at: page.seq, cursor: page.cursor } : { phase: "changes", cursor: page.cursor };
-      await applyPage(db, page, next);
+      await applyPage(db, page, next, key);
       const phase = p.phase;
       p = next;
       received += page.changes.length;
