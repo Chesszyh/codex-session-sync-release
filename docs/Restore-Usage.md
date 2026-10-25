@@ -17,7 +17,7 @@ python3 -m replica --store /path/to/archive restore \
 
 输出目录必须尚不存在。已有目录即使包含相同历史或较短前缀，也会被拒绝；此命令不向已有原生 home 合并会话。
 
-支持的目标运行时由 [source.json](../adapters/official/source.json) 中的 `restore_tested_runtimes` 管理。源数据必须符合 [restore-schema.json](../adapters/official/restore-schema.json) 中的元数据列集合，并使用官方解码器支持的 `paginated` 记录。旧版本留下的日志若已由原生程序迁移为这一格式，可以恢复。未知格式、缺失依赖、无法证明的历史头或不匹配的运行时会停止导入；归档和查看器内容保留。
+支持的目标运行时由 [source.json](../adapters/official/source.json) 中的 `restore_tested_runtimes` 管理。源数据必须符合 [restore-schema.json](../adapters/official/restore-schema.json) 中的元数据列集合，或增加创建者身份字段之前的同一结构，并使用官方解码器支持的 `paginated` 记录。`creator_user_id` 和 `creator_account_id` 会通过官方元数据接口导入并回读核对；旧结构缺少这两个字段时，目标使用空值。旧版本留下的日志若已由原生程序迁移为这一格式，可以恢复。未知格式、缺失依赖、无法证明的历史头或不匹配的运行时会停止导入；归档和查看器内容保留。
 
 ## 结果文件
 
@@ -35,7 +35,7 @@ python3 -m replica --store /path/to/archive restore \
 
 `report.json` 的 `read_verified: true` 表示：官方接口返回的条目内容与顺序、轮次状态、所选历史头和支持的会话元数据一致；`raw_unchanged: true` 表示导入和回读未改变复制的原始字节。父历史只复制被引用的前缀，未完成的末尾记录不进入恢复结果。源归档仍保留完整采集内容。
 
-恢复保留名称、归档状态、工作目录、模型配置、权限策略、时间、Git 信息及显式清空值。分组和项目通过官方接口创建，原生 ID 会重新分配；项目根目录顺序和附件绑定内容会核对。旧的 `has_user_event`、`is_pinned` 列，以及项目原始排列位置、创建/更新时间和附件创建时间只保存在元数据文件中；固定版本官方模型使用 `thread_section_id` 表示分组和置顶关系。
+恢复保留名称、归档状态、工作目录、模型配置、权限策略、时间、Git 信息及显式清空值。名称索引中有有效名称时，使用它作为恢复后的原生名称。分组和项目通过官方接口创建，原生 ID 会重新分配；项目根目录顺序和附件绑定内容会核对。旧的 `has_user_event`、`is_pinned` 列，以及项目原始排列位置、创建/更新时间和附件创建时间只保存在元数据文件中；固定版本官方模型使用 `thread_section_id` 表示分组和置顶关系。
 
 工作区文件、外部资源和凭据不属于本次恢复产物。`workspace_exists` 仅报告源工作目录在目标机器是否存在，不代表其文件内容相同。之后使用恢复会话时，需要明确指定产物中的 `CODEX_HOME` 与 `CODEX_SQLITE_HOME`，并提供目标机器自己的工作区和凭据。不要移动已经导入的目录，原生数据库中的历史路径是绝对路径。
 
@@ -44,7 +44,7 @@ python3 -m replica --store /path/to/archive restore \
 测试运行时必须显式选择，不使用自动更新的桌面二进制作为默认值。可将受支持版本安装到独立目录，例如：
 
 ```sh
-npm install --prefix .m6/restore-runtime --no-save @openai/codex@0.155.0-alpha.16.4
+npm install --prefix .m6/restore-runtime --no-save @openai/codex@0.163.0
 REPLICA_TEST_BINARY="$PWD/.m6/restore-runtime/node_modules/.bin/codex" python scripts/check.py --full
 ```
 

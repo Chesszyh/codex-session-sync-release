@@ -16,7 +16,9 @@ def now():
 
 
 class SourceClient:
-    def __init__(self, home, sqlite_home, ssh=None):
+    def __init__(self, home, sqlite_home, ssh=None, ssh_via=None):
+        if ssh_via and not ssh:
+            raise ValueError("ssh_via requires an SSH source")
         self.local = Source(home, sqlite_home) if ssh is None else None
         self.process = None
         self.source_bytes_received = 0
@@ -24,8 +26,11 @@ class SourceClient:
         if ssh:
             code = Path(__file__).with_name("source.py").read_bytes().hex()
             remote = shlex.join(["python3", "-u", "-c", "exec(bytes.fromhex(" + repr(code) + "))", "--home", home, "--sqlite-home", sqlite_home])
-            self.process = subprocess.Popen(["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
-                "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=2", ssh, remote],
+            command = ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+                       "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=2"]
+            if ssh_via:
+                remote = shlex.join([*command, ssh, remote])
+            self.process = subprocess.Popen([*command, ssh_via or ssh, remote],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
     def request(self, value):
@@ -310,7 +315,7 @@ def collect(store, client, host, source_home, sqlite_home):
                 census["metadata_after_capture"] = final_metadata
         report["capture_consistency"] = "eventually consistent; per-database read transactions, complete visible raw prefixes"
         report["complete"] = census["complete"] and not report["errors"]
-        inventory = store.put_json(census)
+        inventory = store.put_inventory(census)
         report["files_seen"] = len(census["files"])
         report["metadata_threads"] = len(census["metadata"]["tables"]["threads"]) if census["metadata"] else None
         previous_inventory = store.db.execute("SELECT inventory_object FROM homes WHERE id=?", (home,)).fetchone()[0]

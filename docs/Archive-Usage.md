@@ -45,7 +45,7 @@ install -m 600 config/sources.example.json ~/.config/codex-session-sync/sources.
   --host local --home /path/to/codex-home --sqlite-home /path/to/sqlite-home
 ```
 
-远程采集在相同命令上增加 `--ssh Macmini`，并将两个 home 换成远程绝对路径。采集失败返回非零退出码；输出仅含计数、状态和进度，不显示会话正文。
+远程采集在相同命令上增加 `--ssh Macmini`，并将两个 home 换成远程绝对路径。如果连接需要沿用另一台机器的 SSH 凭据，可同时指定 `--ssh-via RelayHost`；来源配置中的对应字段为 `ssh_via`。连接会在中转机器上执行，来源身份和目录不变。采集失败返回非零退出码；输出仅含计数、状态和进度，不显示会话正文。
 
 查看已提交的归档状态与目录：
 
@@ -102,7 +102,7 @@ journalctl --user -u codex-session-replica.service -n 10 --no-pager
 
 ## 备份与验证
 
-备份归档前停止采集，再复制整个归档目录，包含 `archive.key`、数据库及其 WAL 文件、`objects/`。恢复时使用完整目录；密钥用于解密已保存的对象。
+备份归档前停止本项目后台服务，再复制整个归档目录，包含 `archive.key`、归档/阅读/通知数据库及其 WAL 文件、`objects/`。恢复时使用完整目录；密钥用于解密已保存的对象。各类数据的保留与重建范围见[存储职责](Storage-Layout.md)。
 
 回归测试和大文件测试均只操作生成数据：
 
@@ -112,3 +112,23 @@ journalctl --user -u codex-session-replica.service -n 10 --no-pager
 ```
 
 大文件测试目录必须尚不存在，测试会写入约三份指定规模的数据，输出内存峰值、增量传输量和原始字节回读结果。
+
+## 对象空间整理
+
+新写入的可压缩对象会在加密前压缩，大型扫描清单会复用内容分块。已有对象不会自动转换。以下命令默认只读取、校验和估算对象体积，不修改归档：
+
+```sh
+.venv/bin/python scripts/repack_objects.py --store /path/to/replica
+```
+
+`--limit 100` 可用于小批量估算。输出的 `before_bytes` 与 `after_bytes` 是所检查对象的逻辑文件大小，差值不代表文件系统实际释放量。采集报告中的 `new_object_bytes` 表示本轮截至报告保存前新写入的密文文件字节数，包含分块；不包含数据库与临时文件写入。
+
+全部读取归档的程序更新后，停止采集器，在命令后加 `--apply` 才会转换。工具取得归档写锁，每个对象先完整解密和校验，再原子替换其存储表示；数据库、对象身份、变更序号和原始字节保持不变。中断后可重复执行。
+
+恢复旧版读取器前，先停止采集器，用新版工具将全部对象还原成原始表示：
+
+```sh
+.venv/bin/python scripts/repack_objects.py --store /path/to/replica --uncompressed --apply
+```
+
+还原会展开分块清单，所需空间按完整逻辑对象计算。分块文件仍保留，不执行垃圾回收。阅读索引、历史记录保留期和浏览器游标不受对象整理影响。

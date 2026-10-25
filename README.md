@@ -32,7 +32,7 @@ flowchart LR
 
 ## 安装与演示
 
-在仓库根目录运行。需要 Python 3.12+、Node.js 22、npm、zstd；官方适配器另外需要 Rust/rustup、GitHub CLI（`gh api` 需可用认证）和 C/C++ 构建工具。适配器固定版本与工具链见 [source.json](adapters/official/source.json)，初次构建需要下载源码及 Rust 依赖。
+在仓库根目录运行。需要 Python 3.12+、Node.js 22、npm、zstd；官方适配器另外需要 Rust/rustup、GitHub CLI（`gh api` 需可用认证）和 C/C++ 构建工具。适配器固定版本与工具链见 [source.json](adapters/official/source.json)，初次构建需要下载源码及 Rust 依赖。Linux 构建还需要 pkg-config 和 OpenSSL 开发包；Ubuntu 可安装 `pkg-config libssl-dev`。
 
 ```sh
 python3 -m venv .venv
@@ -59,6 +59,7 @@ python3 scripts/add_source.py --server Macmini --ssh NewMachine --host NewMachin
 前提是中心能够通过 SSH 登录新机器；目录探测、配置备份和生效方式见[接入说明](docs/Archive-Usage.md#一条命令接入新机器)。也可按归档说明手动配置来源，执行 `collect` 或 `watch`；按[查看器说明](docs/Viewer-Usage.md)执行 `normalize` 和 `serve`。持续采集、投影和查看服务分别运行，关闭查看器不停止采集。已有机器的快捷入口见[启动说明](docs/Launcher-Usage.md)。
 
 - [归档格式](docs/Archive-Format.md)：完整扫描、原始提交边界与历史依赖。
+- [存储职责](docs/Storage-Layout.md)：长期归档、阅读工作数据和缓存的重建与保留。
 - [查看器协议](docs/Viewer-Protocol.md)：快照、增量、游标与来源定位。
 - [通知观察](docs/Owner-Observation.md)：连接范围及不可补回的通知缺口。
 

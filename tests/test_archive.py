@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import shlex
 import subprocess
 import tempfile
 import time
@@ -26,7 +27,7 @@ def line(kind, payload, ordinal):
 class ArchiveTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.home = self.root / "home"
         (self.home / "sessions").mkdir(parents=True)
         self.db = sqlite3.connect(self.home / "state_5.sqlite")
@@ -63,6 +64,39 @@ class ArchiveTests(unittest.TestCase):
         out = self.root / ("export-" + str(len(list(self.root.glob("export-*")))))
         self.store.export(generation, out)
         return out.read_bytes()
+
+    def test_large_inventory_roundtrip_and_unchanged_scan(self):
+        for i in range(70):
+            self.add_thread(f"10000000-0000-4000-8000-{i:012d}")
+        self.assertTrue(self.run_scan()["complete"])
+        identity = self.store.db.execute("SELECT inventory_object FROM homes").fetchone()[0]
+        self.assertEqual(self.store.json(identity), self.client.census())
+        self.db.execute("UPDATE threads SET title=? WHERE id=?", ("updated title", THREAD))
+        self.db.commit()
+        self.assertTrue(self.run_scan()["complete"])
+        next_identity = self.store.db.execute("SELECT inventory_object FROM homes").fetchone()[0]
+        self.assertNotEqual(identity, next_identity)
+        self.assertEqual(self.store.json(next_identity), self.client.census())
+        inventory_changes = self.store.db.execute("SELECT count(*) FROM changes WHERE kind='inventory'").fetchone()[0]
+        again = self.run_scan()
+        self.assertEqual(again["read_bytes"], 0)
+        self.assertEqual(again["new_object_bytes"], 0)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM changes WHERE kind='inventory'").fetchone()[0], inventory_changes)
+        self.assertEqual(self.exported(self.generation()), self.path.read_bytes())
+
+    def test_ssh_relay_preserves_source_paths_and_command(self):
+        with self.assertRaisesRegex(ValueError, "requires an SSH source"):
+            SourceClient("/fixture/source", "/fixture/sqlite", ssh_via="relay-host")
+        with patch("replica.collect.subprocess.Popen") as process:
+            client = SourceClient("/fixture/source with spaces", "/fixture/sqlite", "source-host", "relay-host")
+            command = process.call_args.args[0]
+            self.assertEqual(command[-2], "relay-host")
+            inner = shlex.split(command[-1])
+            self.assertEqual(inner[-2], "source-host")
+            source = shlex.split(inner[-1])
+            self.assertEqual(source[:3], ["python3", "-u", "-c"])
+            self.assertEqual(source[-4:], ["--home", "/fixture/source with spaces", "--sqlite-home", "/fixture/sqlite"])
+            client.close()
 
     def test_append_partial_utf8_and_restart(self):
         first = self.run_scan()
