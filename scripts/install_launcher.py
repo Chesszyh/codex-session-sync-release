@@ -12,8 +12,10 @@ import subprocess
 import sys
 
 
-def install(server, local=False):
+def install(server, local=False, forward_ports=()):
     home = Path.home()
+    ports = sorted({8765, *forward_ports})
+    forwards = [arg for port in ports for arg in ("-L", f"127.0.0.1:{port}:127.0.0.1:{port}")]
     directory = home / ".local/share/codex-session-sync/launcher"
     directory.mkdir(parents=True, exist_ok=True)
     script = directory / "open_viewer.py"
@@ -28,7 +30,7 @@ def install(server, local=False):
 
     config = home / ".config/codex-session-sync"
     config.mkdir(parents=True, exist_ok=True)
-    (config / "launcher.json").write_text(json.dumps({"server": server}) + "\n")
+    (config / "launcher.json").write_text(json.dumps({"server": server, "forward_ports": ports}) + "\n")
     if platform.system() == "Linux" and server:
         units = home / ".config/systemd/user"
         units.mkdir(parents=True, exist_ok=True)
@@ -36,7 +38,7 @@ def install(server, local=False):
             "[Unit]\nDescription=Session archive SSH connection\n[Service]\n"
             "ExecStart=/usr/bin/ssh -NT -o BatchMode=yes -o ConnectTimeout=10 "
             "-o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "
-            "-L 127.0.0.1:8765:127.0.0.1:8765 " + server + "\n"
+            + shlex.join(forwards) + " " + server + "\n"
             "Restart=always\nRestartSec=15\n[Install]\nWantedBy=default.target\n")
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
         subprocess.run(["systemctl", "--user", "enable", "codex-session-connection.service"], check=True)
@@ -70,7 +72,7 @@ def install(server, local=False):
         service = {"Label": label, "ProgramArguments": ["/usr/bin/ssh", "-NT", "-o", "BatchMode=yes",
                    "-o", "ConnectTimeout=10", "-o", "ExitOnForwardFailure=yes",
                    "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
-                   "-L", "127.0.0.1:8765:127.0.0.1:8765", server],
+                   *forwards, server],
                    "RunAtLoad": True, "KeepAlive": True, "ThrottleInterval": 15,
                    "StandardOutPath": str(log / "connection.log"), "StandardErrorPath": str(log / "connection-error.log")}
         domain = f"gui/{os.getuid()}"
@@ -99,5 +101,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server", help="SSH alias of the archive host")
     parser.add_argument("--local", action="store_true", help="Open services running on this Mac")
+    parser.add_argument("--forward-port", type=int, action="append", default=[], help="Forward an additional loopback listener alongside port 8765")
     args = parser.parse_args()
-    install(args.server, args.local)
+    if any(port < 1 or port > 65535 for port in args.forward_port):
+        parser.error("--forward-port must be between 1 and 65535")
+    install(args.server, args.local, args.forward_port)

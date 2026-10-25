@@ -18,6 +18,7 @@ def main():
     capture.add_argument("--home", required=True)
     capture.add_argument("--sqlite-home", required=True)
     capture.add_argument("--ssh", help="Existing SSH host alias; omit for local files")
+    capture.add_argument("--ssh-via", help="Run the source SSH connection on this relay host")
     commands.add_parser("status", help="Counts and last completed scans; no transcript bodies")
     normalize = commands.add_parser("normalize", help="Build readable history from the archive with the pinned official decoder")
     normalize.add_argument("--interval", type=float, default=0, help="Repeat after this many seconds; zero runs once")
@@ -49,6 +50,8 @@ def main():
     watch.add_argument("--config", type=Path, required=True)
     watch.add_argument("--interval", type=float, default=60)
     args = parser.parse_args()
+    if args.command == "collect" and args.ssh_via and not args.ssh:
+        parser.error("--ssh-via requires --ssh")
     if args.command == "restore":
         from .restore import restore, RestoreRefused
         try:
@@ -112,7 +115,7 @@ def main():
                 if not running:
                     break
                 store = Store(args.store)
-                client = SourceClient(source["home"], source["sqlite_home"], source.get("ssh"))
+                client = SourceClient(source["home"], source["sqlite_home"], source.get("ssh"), source.get("ssh_via"))
                 try:
                     report = collect(store, client, source["host"], source["home"], source["sqlite_home"])
                     print(json.dumps({"host": source["host"], "complete": report["complete"], "read_bytes": report["read_bytes"], "errors": len(report["errors"]), "dependency_issues": len(report["dependencies"]["issues"]) if "dependencies" in report else None, "seq": report["seq"]}), flush=True)
@@ -126,7 +129,7 @@ def main():
     store = Store(args.store, readonly=args.command != "collect")
     try:
         if args.command == "collect":
-            client = SourceClient(args.home, args.sqlite_home, args.ssh)
+            client = SourceClient(args.home, args.sqlite_home, args.ssh, args.ssh_via)
             try:
                 result = collect(store, client, args.host, args.home, args.sqlite_home)
                 result["error_count"] = len(result["errors"])

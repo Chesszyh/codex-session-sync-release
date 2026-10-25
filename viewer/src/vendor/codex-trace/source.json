@@ -1,7 +1,7 @@
 {
   "project": "codex-trace",
   "repository": "https://github.com/PixelPaw-Labs/codex-trace.git",
-  "revision": "a9d9b6b0231930dff66eaab7a8756babd6dba946",
+  "revision": "2e6a716a4e6d321afc60180bd178e69658c1ac3e",
   "version": "0.6.0",
   "license": "MIT",
   "files": [

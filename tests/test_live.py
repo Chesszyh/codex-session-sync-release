@@ -15,7 +15,7 @@ from replica.store import Store
 class LiveTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         Store(self.root / "archive").close()
         self.journal = LiveJournal(self.root / "archive")
 
@@ -109,7 +109,7 @@ class NativeOwnerTest(unittest.TestCase):
                     time.sleep(0.03)
 
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary).resolve()
             home = root / "owner"
             home.mkdir()
             model = ThreadingHTTPServer(("127.0.0.1", 0), Model)
@@ -123,10 +123,11 @@ wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = false
 ''')
-            socket_path = home / "app-server-control/app-server-control.sock"
+            # Darwin's Unix socket path limit is shorter than its default temporary home path.
+            socket_path = root / "owner.sock"
             archive = root / "archive"
             Store(archive).close()
-            owner_process = subprocess.Popen([str(BINARY), "app-server", "--listen", "unix://"],
+            owner_process = subprocess.Popen([str(BINARY), "app-server", "--listen", "unix://" + str(socket_path)],
                 cwd=root, env={"PATH": os.environ["PATH"], "HOME": str(home), "CODEX_HOME": str(home), "CODEX_SQLITE_HOME": str(home)}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             observer_thread, driver = None, None
             try:

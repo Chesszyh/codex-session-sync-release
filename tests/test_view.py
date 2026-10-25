@@ -3,6 +3,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from m0.fixtures import generate, encode as raw_encode, message, meta, THREAD
 from replica.collect import SourceClient, collect
@@ -16,7 +17,7 @@ class ViewTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.temporary = tempfile.TemporaryDirectory()
-        cls.cases = {c["name"]: c for c in generate(Path(cls.temporary.name) / "fixtures")}
+        cls.cases = {c["name"]: c for c in generate(Path(cls.temporary.name).resolve() / "fixtures")}
 
     @classmethod
     def tearDownClass(cls):
@@ -24,7 +25,7 @@ class ViewTests(unittest.TestCase):
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
 
     def tearDown(self):
         self.temp.cleanup()
@@ -86,6 +87,25 @@ class ViewTests(unittest.TestCase):
         view = View(self.root / "archive", readonly=True)
         self.assertEqual(view.seq(), cursor)
         view.close()
+
+    def test_decoder_revision_reprojects_existing_bytes_without_resetting_feed(self):
+        self.capture("item-update")
+        sync(self.root / "archive")
+        view = View(self.root / "archive", readonly=True)
+        before = view.seq()
+        view.close()
+        with patch("replica.normalize.PROVENANCE", "updated-official-decoder"):
+            result = sync(self.root / "archive")
+            self.assertGreater(result["decoded_bytes"], 0)
+            view = View(self.root / "archive", readonly=True)
+            try:
+                self.assertGreater(view.seq(), before)
+                self.assertEqual(view.threads()[0]["coverage"]["parser"], "updated-official-decoder")
+                self.assertEqual(view.threads()[0]["items"], 4)
+                self.assertFalse(view.feed(after=before).get("reset_required", False))
+            finally:
+                view.close()
+            self.assertEqual(sync(self.root / "archive")["decoded_bytes"], 0)
 
     def test_legacy_uses_official_builder_and_selected_head_excludes_old_history(self):
         case = self.capture("selected-head")

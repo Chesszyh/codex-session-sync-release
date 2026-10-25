@@ -6,8 +6,22 @@ import os
 from pathlib import Path
 import sqlite3
 import uuid
+import zlib
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+OBJECT_HEADER = b"CSRO\x00\x00\x00\x01"
+
+
+def map_inventory(census, transform):
+    result = {**census, "files": transform(census["files"])}
+    for field in ("metadata", "metadata_after_capture"):
+        metadata = census.get(field)
+        if metadata is not None:
+            result[field] = {**metadata, "tables": {
+                name: transform(rows) for name, rows in metadata["tables"].items()}}
+    return result
 
 
 def encode(value):
@@ -102,18 +116,59 @@ class Store:
         if self.lock:
             self.lock.close()
 
+    def pack(self, identity, data, kind=1, compress=True):
+        payload = zlib.compress(data, 3) if compress and (kind == 2 or len(data) >= 1024) else data
+        if compress and (kind == 2 or len(payload) + len(OBJECT_HEADER) + 1 < len(data)):
+            nonce = os.urandom(12)
+            return OBJECT_HEADER + nonce + self.cipher.encrypt(
+                nonce, bytes([kind]) + payload, identity.encode() + OBJECT_HEADER)
+        nonce = os.urandom(12)
+        return nonce + self.cipher.encrypt(nonce, data, identity.encode())
+
+    def write_object(self, identity, encrypted):
+        path = self.objects / identity[:2] / identity[2:]
+        durable_write(path, encrypted)
+        self.new_object_bytes += len(encrypted)
+
     def put(self, data):
         identity = hashlib.sha256(data).hexdigest()
         path = self.objects / identity[:2] / identity[2:]
         if not path.exists():
-            nonce = os.urandom(12)
-            durable_write(path, nonce + self.cipher.encrypt(nonce, data, identity.encode()))
-            self.new_object_bytes += len(data)
+            self.write_object(identity, self.pack(identity, data))
+        return identity
+
+    def put_inventory(self, census):
+        data = encode(census)
+        if len(data) < 8192:
+            return self.put(data)
+        identity = hashlib.sha256(data).hexdigest()
+        if not (self.objects / identity[:2] / identity[2:]).exists():
+            def chunks(rows):
+                return [self.put_json(rows[start:start+16]) for start in range(0, len(rows), 16)]
+            manifest = map_inventory(census, chunks)
+            self.write_object(identity, self.pack(identity, encode(manifest), kind=2))
         return identity
 
     def get(self, identity):
         encrypted = (self.objects / identity[:2] / identity[2:]).read_bytes()
-        plain = self.cipher.decrypt(encrypted[:12], encrypted[12:], identity.encode())
+        payload = None
+        if encrypted.startswith(OBJECT_HEADER):
+            offset = len(OBJECT_HEADER)
+            try:
+                payload = self.cipher.decrypt(encrypted[offset:offset+12], encrypted[offset+12:],
+                                              identity.encode() + OBJECT_HEADER)
+            except InvalidTag:
+                # A legacy random nonce can start with the format header.
+                pass
+        if payload is None:
+            plain = self.cipher.decrypt(encrypted[:12], encrypted[12:], identity.encode())
+        elif payload[0] == 1:
+            plain = zlib.decompress(payload[1:])
+        elif payload[0] == 2:
+            manifest = json.loads(zlib.decompress(payload[1:]))
+            plain = encode(map_inventory(manifest, lambda ids: [row for obj in ids for row in self.json(obj)]))
+        else:
+            raise RuntimeError("unsupported archive object encoding")
         if hashlib.sha256(plain).hexdigest() != identity:
             raise RuntimeError("archive object identity mismatch")
         return plain

@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 import subprocess
 
-from m0.rpc_probe import Client
+from .rpc import Client
 
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = json.loads((ROOT / "adapters/official/source.json").read_text())

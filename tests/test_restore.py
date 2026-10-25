@@ -10,25 +10,17 @@ from unittest.mock import patch
 
 from m0.fixtures import THREAD, PARENT, encode, meta, envelope
 from replica.collect import SourceClient, collect
-from replica.restore import restore, RestoreRefused, SCHEMA, IMPORTER, verify_native
+from replica.restore import restore, source_plan, RestoreRefused, SCHEMA, IMPORTER, verify_native
 from replica.store import Store
 
 BINARY = Path(os.environ["REPLICA_TEST_BINARY"]) if os.environ.get("REPLICA_TEST_BINARY") else None
 NEW = "00000000-0000-4000-8000-000000000003"
 
 
-@unittest.skipUnless(BINARY is not None, "set REPLICA_TEST_BINARY to a supported fixed runtime")
-class RestoreTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        from replica.native_verify import runtime_version
-        if not IMPORTER.is_file():
-            raise RuntimeError("build the official adapter before running restore integration")
-        runtime_version(BINARY.resolve())
-
+class RestoreFixture:
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.home = self.root / "source"
         (self.home / "sessions/2026/09/22").mkdir(parents=True)
         self.db = sqlite3.connect(self.home / "state_5.sqlite")
@@ -77,17 +69,87 @@ class RestoreTests(unittest.TestCase):
     def run_restore(self, name="restored"):
         return restore(self.archive, self.origin, THREAD, self.root / name, BINARY.resolve(), page_size=2)
 
+class RestorePlanTests(RestoreFixture, unittest.TestCase):
+    def plan(self):
+        self.capture()
+        archive = Store(self.archive, readonly=True)
+        try:
+            return source_plan(archive, self.origin, THREAD)
+        finally:
+            archive.close()
+
+    def test_current_creator_fields_are_retained_in_plan(self):
+        self.db.execute("UPDATE threads SET creator_user_id='fixture-user',creator_account_id='fixture-account'")
+        metadata = self.plan()["metadata"]
+        self.assertEqual(metadata["creator_user_id"], "fixture-user")
+        self.assertEqual(metadata["creator_account_id"], "fixture-account")
+
+    def test_session_index_name_becomes_the_restored_native_name(self):
+        (self.home / "session_index.jsonl").write_text(json.dumps({"id": THREAD, "thread_name": "indexed name"}) + "\n")
+        metadata = self.plan()["metadata"]
+        self.assertEqual(metadata["name"], "indexed name")
+        self.assertNotIn("thread_name", metadata)
+
+    def test_pre_identity_schema_is_supported_but_unknown_columns_are_refused(self):
+        for field in ("creator_user_id", "creator_account_id"):
+            self.db.execute('ALTER TABLE threads DROP COLUMN "' + field + '"')
+        self.assertNotIn("creator_user_id", self.plan()["metadata"])
+        self.db.execute("ALTER TABLE threads ADD COLUMN future_field TEXT")
+        with self.assertRaisesRegex(RestoreRefused, "schema"):
+            self.plan()
+
+
+@unittest.skipUnless(BINARY is not None, "set REPLICA_TEST_BINARY to a supported fixed runtime")
+class RestoreTests(RestoreFixture, unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from replica.native_verify import runtime_version
+        if not IMPORTER.is_file():
+            raise RuntimeError("build the official adapter before running restore integration")
+        runtime_version(BINARY.resolve())
+
     def test_canonical_items_metadata_nulls_and_repeat_official_read(self):
+        self.db.execute("UPDATE threads SET creator_user_id='fixture-user',creator_account_id='fixture-account'")
         self.capture()
         result = self.run_restore()
         self.assertTrue(result["raw_unchanged"])
         self.assertEqual(result["items"], 4)
         self.assertEqual(result["loaded_threads"], 0)
-        self.assertEqual(result["metadata_fields_verified"], 38)
+        self.assertEqual(result["metadata_fields_verified"], 40)
         self.assertTrue(verify_native(self.root / "restored", BINARY.resolve(), 1)["read_verified"])
         for file in (self.root / "restored").rglob("*"):
             if file.is_file():
                 self.assertEqual(file.stat().st_mode & 0o777, 0o600, str(file.relative_to(self.root)))
+
+    def test_creator_identity_nulls_and_pre_identity_schema_restore(self):
+        self.capture()
+        self.assertTrue(self.run_restore("null-identities")["read_verified"])
+        for field in ("creator_user_id", "creator_account_id"):
+            self.db.execute('ALTER TABLE threads DROP COLUMN "' + field + '"')
+        self.capture()
+        result = self.run_restore("legacy-schema")
+        self.assertTrue(result["read_verified"])
+        self.assertEqual(result["metadata_fields_verified"], 38)
+
+    def test_session_index_name_restores_through_official_metadata(self):
+        (self.home / "session_index.jsonl").write_text(json.dumps({"id": THREAD, "thread_name": "indexed name"}) + "\n")
+        self.capture()
+        self.assertTrue(self.run_restore()["read_verified"])
+        plan = json.loads((self.root / "restored/plan.json").read_text())
+        self.assertEqual(plan["threads"][0]["metadata"]["name"], "indexed name")
+
+    def test_legacy_thread_schema_and_index_name(self):
+        for field in ("creator_user_id", "creator_account_id"):
+            self.db.execute('ALTER TABLE threads DROP COLUMN "' + field + '"')
+        (self.home / "session_index.jsonl").write_text(json.dumps({"id": THREAD, "thread_name": "indexed name"}) + "\n")
+        self.capture()
+        result = self.run_restore()
+        self.assertEqual(result["metadata_fields_verified"], 38)
+        db = sqlite3.connect(self.root / "restored/sqlite/state_5.sqlite")
+        try:
+            self.assertEqual(db.execute("SELECT name FROM threads WHERE id=?", (THREAD,)).fetchone()[0], "indexed name")
+        finally:
+            db.close()
 
     def test_section_project_roots_and_attachment_semantics(self):
         self.insert("thread_sections", {"id": "group-a", "name": "Research", "appearance": None})

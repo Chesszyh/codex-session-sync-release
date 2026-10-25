@@ -65,6 +65,8 @@
     "section_entered_at_ms",
     "project_id",
     "originator",
-    "daybreak_enabled"
+    "daybreak_enabled",
+    "creator_user_id",
+    "creator_account_id"
   ]
 }

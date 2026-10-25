@@ -12,6 +12,7 @@ from .store import Store, durable_write, encode, ensure_directory
 SPEC = json.loads((ROOT / "adapters/official/source.json").read_text())
 SCHEMA = json.loads((ROOT / "adapters/official/restore-schema.json").read_text())
 IMPORTER = DECODER.with_name("replica_restore")
+LEGACY_THREAD_FIELDS = set(SCHEMA["threads"]) - {"creator_user_id", "creator_account_id"}
 
 
 
@@ -23,13 +24,18 @@ def source_plan(archive, origin, thread_id):
     inventory = archive.json(home["inventory_object"])
     metadata = inventory.get("metadata_after_capture", inventory["metadata"])
     for table, fields in metadata["schema"].items():
-        if table not in SCHEMA or set(fields) != set(SCHEMA[table]):
+        if table not in SCHEMA or (set(fields) != set(SCHEMA[table])
+                                  and not (table == "threads" and set(fields) == LEGACY_THREAD_FIELDS)):
             raise RestoreRefused("unsupported source schema: " + table)
-    if set(metadata["schema"].get("threads", [])) != set(SCHEMA["threads"]):
+    thread_fields = set(metadata["schema"].get("threads", []))
+    if thread_fields not in (set(SCHEMA["threads"]), LEGACY_THREAD_FIELDS):
         raise RestoreRefused("thread schema is incomplete")
     row = archive.json(thread["metadata_object"])
-    if set(row) != set(SCHEMA["threads"]) or row["history_mode"] != "paginated":
+    thread_name = row.pop("thread_name", None)
+    if set(row) != thread_fields or row["history_mode"] != "paginated":
         raise RestoreRefused("native restore currently supports the allowlisted paginated schema")
+    if thread_name:
+        row["name"] = thread_name
     selected = archive.db.execute(
         "SELECT * FROM files WHERE home_id=? AND (path=? OR path=?) ORDER BY encoding='jsonl' DESC LIMIT 1",
         (origin, thread["head_path"], (thread["head_path"] or "") + ".zst")).fetchone()

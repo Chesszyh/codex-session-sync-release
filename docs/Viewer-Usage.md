@@ -24,7 +24,7 @@ npm --prefix viewer run build
 .venv/bin/python -m replica --store ~/.local/share/codex-session-sync/replica serve
 ```
 
-打开 `http://127.0.0.1:8765`。首次索引需要遍历已有归档，后续 `normalize` 只解码新增的完整字节。持续更新使用 `normalize --interval 15`。两个进程都需要运行；原始数据仍由独立采集器保存。
+打开 `http://127.0.0.1:8765`。首次索引需要遍历已有归档，后续 `normalize` 只解码新增的完整字节。官方解码器的固定源码版本变化后，首次运行会重新解码已归档内容，沿用原有浏览器同步序号。持续更新使用 `normalize --interval 15`。两个进程都需要运行；原始数据仍由独立采集器保存。
 
 Linux 后台服务提供 [indexer 模板](../deploy/codex-session-indexer.service.in)和 [viewer 模板](../deploy/codex-session-viewer.service.in)。按[归档服务安装方法](Archive-Usage.md#后台采集)替换模板中的解释器和项目路径，分别保存为同名 `.service`，再执行：
 
@@ -72,7 +72,7 @@ ingress:
 
 `teamName` 和 `audTag` 分别取自 Access 团队域名前缀和应用的 Audience 标识。隧道连接器和公网查看器分别验证 Access 签发的令牌，三个启动参数必须同时配置。后端只接受配置域名作为 Host，不能通过改用本机 Host 绕过校验。本机查看器拒绝带代理转发标记的请求，隧道只能指向公网端口。确认入口校验已配置后，将域名路由到此隧道。未登录时，首页、页面资源和 `/api/status` 都应跳转登录或拒绝访问；登录后再核对会话读取和 `/api/live/ack` 确认请求。官方配置说明见 [Access 与 Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/origin-parameters/#access)。
 
-登录过期时，已缓存页面显示“登录已过期 · 阅读本地副本”，点击“重新登录”恢复在线同步。Access 控制网络访问，不清除浏览器已有副本；共享设备使用完毕后应清除此站点数据。域名与原来的本机地址各有独立副本，首次通过域名登录需要重新同步。Mac mini 离线时，隧道不能提供新数据。
+登录过期时，已缓存页面显示“登录已过期 · 阅读本地副本”，点击“重新登录”恢复在线同步。Access 控制网络访问，不清除浏览器已有副本；共享设备使用完毕后应清除此站点数据。域名与原来的本机地址各有独立副本，首次通过域名登录需要重新同步。归档机或隧道连接器离线时，域名入口不能提供新数据。
 
 ## 阅读
 

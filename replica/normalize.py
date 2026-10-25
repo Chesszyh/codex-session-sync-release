@@ -203,6 +203,13 @@ def sync(root, decoder=DECODER):
         archive, view = Store(root, readonly=True), View(root)
         try:
             archive.db.execute("BEGIN")
+            revision = view.db.execute("SELECT value FROM state WHERE key='decoder_revision'").fetchone()
+            if revision is None or revision[0] != PROVENANCE:
+                # Reinterpret retained bytes while keeping entities and the browser feed monotonic.
+                with view.db:
+                    for table in ("decoded", "events", "issues", "thread_versions"):
+                        view.db.execute("DELETE FROM " + table)
+                    view.db.execute("INSERT OR REPLACE INTO state VALUES ('decoder_revision',?)", (PROVENANCE,))
             source_seq = archive.status()["seq"]
             manifests = {r["id"]: archive.json(r["manifest_object"]) for r in archive.db.execute("SELECT * FROM generations WHERE rollout_id<>'session_index'")}
             decoded_bytes = sum(normalize_generation(archive, view, m, decoder) for m in manifests.values())

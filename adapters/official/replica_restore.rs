@@ -174,6 +174,8 @@ async fn main() -> Result<(), Error> {
         metadata.source = row["source"].as_str().unwrap_or("cli").to_string();
         metadata.history_mode = enum_value(row, "history_mode")?.ok_or("history mode missing")?;
         metadata.originator = optional(row, "originator")?;
+        metadata.creator_user_id = optional(row, "creator_user_id")?;
+        metadata.creator_account_id = optional(row, "creator_account_id")?;
         metadata.thread_source = enum_value(row, "thread_source")?;
         metadata.agent_nickname = optional(row, "agent_nickname")?;
         metadata.agent_role = optional(row, "agent_role")?;

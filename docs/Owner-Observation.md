@@ -7,8 +7,8 @@
 先更新 Python 依赖，再将 [owners.example.json](../config/owners.example.json)中的主机、实际 home、已有 socket 和二进制路径填入私有配置。通过 SSH 连接时复用已有登录，不复制登录凭据。
 
 ```sh
-rtk proxy .venv/bin/python -m pip install -r requirements.txt
-rtk proxy .venv/bin/python -m replica --store ~/.local/share/codex-session-sync/replica observe \
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m replica --store ~/.local/share/codex-session-sync/replica observe \
   --config ~/.config/codex-session-sync/owner.json --seconds 15
 ```
 
@@ -27,7 +27,7 @@ delta（增量文本）进入临时阅读状态，completed item（完成条目�
 事件投递索引不自动清理。需要归档已经由所有已登记接收者确认的投递记录时，可以执行：
 
 ```sh
-rtk proxy .venv/bin/python -m replica --store ~/.local/share/codex-session-sync/replica live-prune --through SEQ
+.venv/bin/python -m replica --store ~/.local/share/codex-session-sync/replica live-prune --through SEQ
 ```
 
 此操作保留加密原始事件及其批次清单。落后于投递保留范围的游标返回 `reset_required`，浏览器重新取得事件快照，同时保留已有的持久历史副本。
