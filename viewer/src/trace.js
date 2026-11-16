@@ -11,6 +11,18 @@ const status = (value) =>
   value ||
   "unknown";
 
+export function readableThreads(saved, live = [], liveItems = []) {
+  const active = new Set(liveItems.map((row) => row.session));
+  const known = new Set(saved.map((thread) => thread.id));
+  return [
+    ...saved.filter(
+      (thread) =>
+        thread.items !== 0 || thread.coverage.status !== "complete" || active.has(thread.id),
+    ),
+    ...live.filter((thread) => !known.has(thread.id) && active.has(thread.id)),
+  ];
+}
+
 export function sessionInfo(thread) {
   const m = thread.metadata || {};
   let source = m.source;

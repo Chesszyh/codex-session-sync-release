@@ -137,7 +137,7 @@ def text_content(item):
 def materialize_thread(archive, view, home, identity, metadata, generation, manifests, file_state):
     session = session_key(home, identity)
     chain, issues = ancestry(archive, manifests, generation) if generation else ([], ["selected_head_missing"])
-    version = encode([metadata, [(g, end) for g, end in chain], issues, file_state, PROVENANCE]).decode()
+    version = encode(["nonempty-v1", metadata, [(g, end) for g, end in chain], issues, file_state, PROVENANCE]).decode()
     previous = view.db.execute("SELECT version FROM thread_versions WHERE session=?", (session,)).fetchone()
     if previous and previous[0] == version:
         return False
@@ -171,7 +171,21 @@ def materialize_thread(archive, view, home, identity, metadata, generation, mani
                                     "ordinal": event["ordinal"], "parser": PROVENANCE}}
                 view.db.execute("INSERT INTO work_items VALUES (?,?,?,?) ON CONFLICT(turn,id) DO UPDATE SET data=excluded.data", (turn, item["id"], position, encode(value).decode()))
                 position += 1
+    # Initial system/developer context is not a conversation. Unknown or incomplete
+    # histories stay visible so decode failures cannot masquerade as empty sessions.
+    meaningful = any(
+        (item := json.loads(row[0])["item"]).get("type") != "rawResponse"
+        or item.get("record", {}).get("type") != "message"
+        or item.get("record", {}).get("role") not in ("system", "developer")
+        for row in view.db.execute("SELECT data FROM work_items")
+    )
+    empty = not meaningful and not set(issues).difference({"legacy_response_context"})
     with view.db:
+        if empty:
+            for row in view.db.execute("SELECT key FROM entities WHERE session=?", (session,)).fetchall():
+                view.delete_entity(row["key"])
+            view.db.execute("INSERT OR REPLACE INTO thread_versions VALUES (?,?)", (session, version))
+            return True
         for row in view.db.execute("SELECT * FROM work_items ORDER BY position"):
             key = encode(["item", session, row["turn"], row["id"]]).decode()
             value = json.loads(row["data"])

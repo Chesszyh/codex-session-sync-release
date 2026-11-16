@@ -22,11 +22,16 @@ def populate(root, update=False):
                     })
                 for identity, title, host, count, archived in [
                     (SID, "让每一次思考，都有迹可循", "Macmini", 4, False),
-                    ("second-session", "周末，整理一下工作台", "Fedora", 0, False),
-                    ("third-session", "九月阅读笔记", "Fedora", 0, True)]:
+                    ("second-session", "周末，整理一下工作台", "Fedora", 1, False),
+                    ("third-session", "九月阅读笔记", "Fedora", 1, True),
+                    ("empty-session", "未发送消息的空会话", "Fedora", 0, False)]:
                     view.set_entity("thread-"+identity, "thread", identity, {"id": identity, "origin": host+":/fixture", "thread_id": identity,
                         "title": title, "archived": archived, "updated_at": 1790049600, "cwd": "/workspace/session-replica", "items": count,
                         "coverage": {"status": "complete", "issues": []}})
+                for identity in ("second-session", "third-session"):
+                    item = {"type": "userMessage", "id": "question", "content": [{"type": "text", "text": "从这里开始"}]}
+                    view.set_entity("item-" + identity, "item", identity, {"session": identity, "position": 0, "turn": "turn-1",
+                        "item": item, "text": "从这里开始", "source": {"generation": "fixture-generation", "start": "0", "end": "100"}})
                 items = [
                     {"type": "userMessage", "id": "user-1", "content": [{"type": "text", "text": "想把不同电脑上的会话保存下来，断网也能继续阅读。应该从哪里开始？"}]},
                     {"type": "agentMessage", "id": "agent-1", "phase": "commentary", "text": "先确认历史保存在哪里，以及哪些信息需要一起保留。接下来检查分段归档和断点恢复。"},
@@ -52,7 +57,15 @@ def live_phase(root, phase):
     def event(method, **params):
         journal.append(origin, epoch, "event", {"method": method, "params": {"threadId": "fixture-thread", "turnId": "live-turn", **params}})
     try:
-        if phase == "start":
+        if phase == "create-empty":
+            journal.append(origin, epoch, "connected", {"scope": "fixture"})
+            journal.append(origin, epoch, "event", {"method": "thread/started", "params": {"thread": {
+                "id": "new-thread", "name": "新会话", "updatedAt": 1790049601}}})
+        elif phase == "first-message":
+            journal.append(origin, epoch, "event", {"method": "item/completed", "params": {
+                "threadId": "new-thread", "turnId": "first-turn", "item": {
+                    "type": "userMessage", "id": "first-user", "content": [{"type": "text", "text": "First message"}]}}})
+        elif phase == "start":
             journal.append(origin, epoch, "connected", {"scope": "fixture"})
             event("item/started", item={"type": "agentMessage", "id": "stream-item", "text": ""})
             event("item/agentMessage/delta", itemId="stream-item", delta="STREAM ")
@@ -75,7 +88,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--update", action="store_true")
-    parser.add_argument("--live-phase", choices=["start", "delta", "complete", "gap", "prune"])
+    parser.add_argument("--live-phase", choices=["create-empty", "first-message", "start", "delta", "complete", "gap", "prune"])
     args = parser.parse_args()
     if args.live_phase:
         live_phase(args.root, args.live_phase)
