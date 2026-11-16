@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { toTurn, toTool, sessionInfo, recordId, itemText } from '../src/trace.js';
+import { toTurn, toTool, sessionInfo, recordId, itemText, readableThreads } from '../src/trace.js';
 
 const row = (position, item) => ({ turn: 'turn', position, item, text: item.text || '', source: { generation: 'prefix', start: '100', end: '200' } });
 test('notification-only user messages and readable reasoning retain their text', () => {
@@ -65,4 +65,16 @@ test('session date groups use the reader timezone across UTC midnight', () => {
   } finally {
     if (oldTZ === undefined) delete process.env.TZ; else process.env.TZ = oldTZ;
   }
+});
+
+test('directory excludes confirmed empty sessions and creation-only notifications', () => {
+  const saved = [
+    {id:'empty', items:0, coverage:{status:'complete', issues:[]}},
+    {id:'message', items:1, coverage:{status:'complete', issues:[]}},
+    {id:'unreadable', items:0, coverage:{status:'partial', issues:['decode_error']}},
+  ];
+  const live = [{id:'created'}, {id:'active'}, {id:'message'}];
+  const items = [{session:'active', item:{type:'userMessage', content:[{type:'text',text:'Hello'}]}}, {session:'empty',item:{type:'agentMessage',text:'Answer'}}];
+  assert.deepEqual(readableThreads(saved, live, items).map(t=>t.id), ['empty','message','unreadable','active']);
+  assert.deepEqual(readableThreads(saved, [], []).map(t=>t.id), ['message','unreadable']);
 });

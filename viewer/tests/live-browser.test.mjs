@@ -12,6 +12,7 @@ test("event replay persists deltas, replaces completion and recovers an expired 
   const archive = resolve(root, "archive");
   const fixture = phase => execFileSync("python3", ["tests/viewer_fixture.py", "--root", archive, ...(phase ? ["--live-phase", phase] : [])], { cwd: repo, env: { ...process.env, PYTHONPATH: repo } });
   fixture();
+  fixture("create-empty");
   const server = spawn("python3", ["-m", "replica", "--store", archive, "serve", "--port", "0"], { cwd: repo, stdio: ["ignore", "pipe", "pipe"] });
   const url = await new Promise((resolve, reject) => { server.stdout.once("data", data => resolve(JSON.parse(data.toString()).url)); server.once("error", reject); });
   const browser = await chromium.launch({ headless: true });
@@ -19,6 +20,13 @@ test("event replay persists deltas, replaces completion and recovers an expired 
     const page = await browser.newPage();
     await page.goto(url);
     await expect(page.locator(".sidebar-tree__session")).toHaveCount(3);
+    fixture("create-empty");
+    await expect(page.locator("#live-status")).toHaveText("通知入口已连接 1 个");
+    await expect(page.locator(".sidebar-tree__session")).toHaveCount(3);
+    await expect(page.getByRole("button", { name: /新会话/ })).toHaveCount(0);
+    fixture("first-message");
+    await expect(page.locator(".sidebar-tree__session")).toHaveCount(4);
+    await expect(page.getByRole("button", { name: /新会话/ })).toBeVisible();
     await page.getByRole("button", { name: /让每一次思考/ }).click();
     fixture("start");
     await expect(page.getByRole("button", { name: "Detail", exact: true })).toHaveCount(2);

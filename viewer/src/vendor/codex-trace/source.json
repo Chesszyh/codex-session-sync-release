@@ -1,7 +1,7 @@
 {
   "project": "codex-trace",
   "repository": "https://github.com/PixelPaw-Labs/codex-trace.git",
-  "revision": "2e6a716a4e6d321afc60180bd178e69658c1ac3e",
+  "revision": "822f316c6f692deb2af509be7665204eab7686e8",
   "version": "0.6.0",
   "license": "MIT",
   "files": [
@@ -29,5 +29,35 @@
     "Ordered complete record timeline and provenance slots",
     "Archive-only inline media",
     "Sidebar scroll helper inlined"
+  ],
+  "local_style_dependencies": [
+    {
+      "upstream_file": "src/styles/global.css",
+      "dependency": "CSS variable names in :root",
+      "local_file": "src/style.css",
+      "details": "Local :root and [data-theme] override --bg, --bg-surface, --bg-elevated, --bg-hover, --bg-selected, --text-primary, --text-bright, --text-secondary, --text-dim, --text-muted, --accent, --border, --ongoing, --scrollbar-thumb across three themes (dark, trace, crimson). If upstream renames any of these, local override silently stops working.",
+      "verification": "node -e \"const c=require('fs').readFileSync('dist/style.css','utf8'); ['--bg','--accent','--border','--ongoing'].forEach(v=>{if(!c.includes(v))throw new Error('missing '+v)}); console.log('vars ok')\""
+    },
+    {
+      "upstream_file": "src/components/TurnDetail.tsx",
+      "dependency": "renderRecord prop and .turn-detail__section--activity class",
+      "local_file": "src/archive.tsx",
+      "details": "archive.tsx passes renderRecord to TurnDetail; local CSS uses .turn-detail__section--activity > article selector. If TurnDetail drops renderRecord or renames the section class, records will not display.",
+      "verification": "grep -n 'renderRecord\\|turn-detail__section--activity' viewer/src/vendor/codex-trace/src/components/TurnDetail.tsx"
+    },
+    {
+      "upstream_file": "src/components/SidebarTree.tsx",
+      "dependency": "BEM class names for sidebar item rows",
+      "local_file": "src/style.css",
+      "details": "Local CSS targets .sidebar-tree__date-header, .sidebar-tree__count, .sidebar-tree__session, .sidebar-tree__session-label, .sidebar-tree__time, .sidebar-tree__session-row. These are overrides for spacing and font size; if upstream renames them, overrides are silently dropped (no functional breakage, only visual regression).",
+      "verification": "grep -o 'sidebar-tree__[a-z-]*' viewer/src/vendor/codex-trace/src/components/SidebarTree.tsx | sort -u"
+    },
+    {
+      "upstream_file": "src/lib/theme.ts",
+      "dependency": "JS inline colors used by TurnDetail and ToolCallItem",
+      "local_file": "src/style.css",
+      "details": "theme.ts colors (modelGpt4 #5fafff, accent #5fafff, etc.) are applied as inline styles and cannot be overridden from CSS. Local palette was chosen to harmonize visually. If upstream changes theme.ts colors significantly, manual review is needed.",
+      "verification": "diff <(node -e \"const t=require('./viewer/src/vendor/codex-trace/src/lib/theme.ts'||\"\"); console.log(t)\") /dev/null"
+    }
   ]
 }

@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { openCache, byKind, searchItems, synchronize } from "./cache.js";
 import { syncLive } from "./live.js";
 import { initialMode, searchReadPages } from "./reading.js";
-import { sessionInfo } from "./trace.js";
+import { readableThreads, sessionInfo } from "./trace.js";
 import { SidebarTree } from "./vendor/codex-trace/src/components/SidebarTree";
 import type { CodexSessionInfo } from "./vendor/codex-trace/shared/types";
 import { Archive, type Thread } from "./archive";
@@ -15,8 +15,37 @@ if (new URLSearchParams(location.search).has("login"))
 const db = await openCache(() => {
   document.getElementById("root")!.textContent = "请关闭此网站的其他旧页面，缓存升级后会继续。";
 });
+const THEMES = ["trace", "dark", "crimson"] as const;
+type Theme = (typeof THEMES)[number];
+const THEME_LABELS: Record<Theme, string> = {
+  trace: "原生方案",
+  dark: "深色方案",
+  crimson: "暗红方案",
+};
+
+function initialTheme(): Theme {
+  const saved = localStorage.getItem("replica-theme");
+  if (saved === "trace" || saved === "dark" || saved === "crimson") return saved;
+  if (saved === "red") return "crimson";
+  if (saved === "black") return "dark";
+  return "dark";
+}
+
+function applyTheme(theme: Theme) {
+  document.documentElement.dataset.theme = theme;
+}
+
+// Apply before first render to avoid flash.
+applyTheme(initialTheme());
+
 function App() {
   const [mode, setMode] = useState<"full" | "demand">(() => initialMode() as "full" | "demand");
+  const [theme, setTheme] = useState<Theme>(initialTheme);
+
+  useEffect(() => {
+    localStorage.setItem("replica-theme", theme);
+    applyTheme(theme);
+  }, [theme]);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [revision, setRevision] = useState(0);
   const [selected, setSelected] = useState(() => decodeURIComponent(location.hash.slice(1)));
@@ -54,17 +83,15 @@ function App() {
       refreshTimer: ReturnType<typeof setTimeout> | undefined;
     let historyTimer: ReturnType<typeof setTimeout>, liveTimer: ReturnType<typeof setTimeout>;
     async function refresh() {
-      const [saved, live, sources, hosts] = await Promise.all([
+      const [saved, live, sources, hosts, liveItems] = await Promise.all([
         byKind(db, "thread"),
         byKind(db, "liveThread"),
         byKind(db, "liveStatus"),
         byKind(db, "host"),
+        mode === "full" ? byKind(db, "liveItem") : Promise.resolve([]),
       ]);
       if (stopped) return;
-      const known = new Set(saved.map((t: Thread) => t.id));
-      setThreads(
-        mode === "full" ? [...saved, ...live.filter((t: Thread) => !known.has(t.id))] : saved,
-      );
+      setThreads(readableThreads(saved, mode === "full" ? live : [], liveItems));
       setRevision((n) => n + 1);
       setArchiveStatus(
         hosts.length
@@ -208,7 +235,7 @@ function App() {
       <aside className="replica-sidebar">
         <header>
           <h1>会话档案</h1>
-          <span>Codex Trace</span>
+          <span>CODEX / ARCHIVE</span>
         </header>
         <input
           ref={search}
@@ -264,34 +291,54 @@ function App() {
           onReachEnd={() => setVisibleCount((n) => n + 150)}
         />
         <footer>
-          <label className="sync-choice">
-            同步方式
-            <select
-              aria-label="同步方式"
-              value={mode}
-              onChange={(e) => setMode(e.target.value as "full" | "demand")}
-            >
-              <option value="demand">按需阅读</option>
-              <option value="full">完整离线副本</option>
-            </select>
-          </label>
-          <small>
+          <div className="sidebar-settings">
+            <label className="sync-choice">
+              <span className="sidebar-field-label">同步方式</span>
+              <select
+                aria-label="同步方式"
+                value={mode}
+                onChange={(e) => setMode(e.target.value as "full" | "demand")}
+              >
+                <option value="demand">按需阅读</option>
+                <option value="full">完整离线副本</option>
+              </select>
+            </label>
+            <div className="theme-choice">
+              <span className="sidebar-field-label">外观配色</span>
+              <div className="theme-switcher" role="group" aria-label="配色方案">
+                {THEMES.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    className={`theme-btn theme-btn--${t}${theme === t ? " theme-btn--active" : ""}`}
+                    aria-label={THEME_LABELS[t]}
+                    title={THEME_LABELS[t]}
+                    aria-pressed={theme === t}
+                    onClick={() => setTheme(t)}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+          <small className="sync-hint">
             {mode === "demand" ? "打开时加载，已读内容可离线" : "自动保存全部历史，离线可全文搜索"}
           </small>
-          <div id="connection" role="status">
-            {connection}
+          <div className="sidebar-status-box">
+            <div id="connection" role="status">
+              {connection}
+            </div>
+            {needsLogin && <a href="/?login=1">重新登录</a>}
+            <small>目录 {threads.length} 条会话</small>
+            <small id="archive-status" title={archiveDetails}>
+              {archiveStatus}
+            </small>
+            <small
+              id="live-status"
+              title="这是原生通知入口数量，不是在线电脑数量；历史归档独立采集。"
+            >
+              {liveStatus}
+            </small>
           </div>
-          {needsLogin && <a href="/?login=1">重新登录</a>}
-          <small>目录 {threads.length} 条会话</small>
-          <small id="archive-status" title={archiveDetails}>
-            {archiveStatus}
-          </small>
-          <small
-            id="live-status"
-            title="这是原生通知入口数量，不是在线电脑数量；历史归档独立采集。"
-          >
-            {liveStatus}
-          </small>
         </footer>
       </aside>
       <main>

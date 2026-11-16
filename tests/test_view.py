@@ -50,6 +50,48 @@ class ViewTests(unittest.TestCase):
     def content(self, view):
         return "\n".join(row["text"] for thread in view.threads() for row in view.items(thread["id"], limit=10000))
 
+    def test_empty_session_disappears_and_returns_when_first_message_arrives(self):
+        home = self.root / "home"
+        (home / "sessions").mkdir(parents=True)
+        db = sqlite3.connect(home / "state_5.sqlite")
+        db.execute("CREATE TABLE threads(id TEXT PRIMARY KEY,rollout_path TEXT,title TEXT)")
+        rollout = home / "sessions" / ("rollout-" + THREAD + ".jsonl")
+        db.execute("INSERT INTO threads VALUES (?,?,?)", (THREAD, str(rollout), "New session"))
+        db.commit()
+        db.close()
+        records = [meta(), message("developer", "Initial instructions")]
+        rollout.write_bytes(raw_encode(records))
+        archive = self.root / "archive"
+
+        def refresh():
+            store = Store(archive)
+            client = SourceClient(str(home), str(home))
+            try:
+                self.assertTrue(collect(store, client, "fixture", str(home), str(home))["complete"])
+            finally:
+                client.close()
+                store.close()
+            sync(archive)
+            view = View(archive, readonly=True)
+            try:
+                return view.threads()
+            finally:
+                view.close()
+
+        self.assertEqual(refresh(), [])
+        with rollout.open("ab") as stream:
+            stream.write(raw_encode([message("user", "First actual message")]))
+        threads = refresh()
+        self.assertEqual(len(threads), 1)
+        self.assertGreater(threads[0]["items"], 0)
+        rollout.write_bytes(raw_encode(records))
+        self.assertEqual(refresh(), [])
+        with rollout.open("ab") as stream:
+            stream.write(b"not valid json\n")
+        threads = refresh()
+        self.assertEqual(len(threads), 1)
+        self.assertIn("decode_error", threads[0]["coverage"]["issues"])
+
     def test_index_name_reaches_view_and_rename_emits_change(self):
         case = self.capture("item-update")
         home = Path(case["home"])
